@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: emergency-response-backend
+    runtime: node
+    region: oregon
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: NODE_ENV
+        value: production

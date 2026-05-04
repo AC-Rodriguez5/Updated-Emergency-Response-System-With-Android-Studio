@@ -1,0 +1,19 @@
+{
+  "name": "emergency-response-system",
+  "version": "1.0.0",
+  "description": "Emergency Response System - 3 Layer Architecture",
+  "private": true,
+  "scripts": {
+    "install:all": "npm install && cd web && npm install && cd ../app && npm install && cd ../backend && npm install",
+    "dev:web": "cd web && npm run dev",
+    "dev:app": "cd app && npm start",
+    "dev:backend": "cd backend && npm run dev",
+    "build:web": "cd web && npm run build",
+    "build:backend": "cd backend && npm run build"
+  },
+  "workspaces": [
+    "web",
+    "app",
+    "backend"
+  ]
+}

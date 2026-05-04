@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" fill="#DC2626"/>
+  <circle cx="512" cy="400" r="200" fill="white" opacity="0.2"/>
+  <path d="M512 250 L562 350 L672 365 L590 445 L610 555 L512 500 L414 555 L434 445 L352 365 L462 350 Z" fill="white"/>
+  <text x="512" y="750" font-family="Arial, sans-serif" font-size="120" font-weight="bold" fill="white" text-anchor="middle">SafeAlert</text>
+</svg>
