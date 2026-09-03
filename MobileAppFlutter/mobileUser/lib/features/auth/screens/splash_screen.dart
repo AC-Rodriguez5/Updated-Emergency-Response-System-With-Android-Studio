@@ -37,8 +37,11 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
       if (!mounted) return;
       if (next is AuthAuthenticated) {
         context.go('/home');
-      } else if (next is AuthPending) context.go('/pending');
-      else if (next is AuthUnauthenticated) context.go('/login');
+      } else if (next is AuthPending) {
+        context.go('/pending');
+      } else if (next is AuthUnauthenticated) {
+        context.go('/login');
+      }
     });
 
     return Scaffold(
@@ -58,7 +61,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
             ),
             const SizedBox(height: 24),
             const Text(
-              'SafeAlert',
+              'TanzAlert',
               style: TextStyle(
                 fontSize: 32,
                 fontWeight: FontWeight.w900,
@@ -71,7 +74,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
               'Tanza MDRRMO Emergency Response',
               style: TextStyle(
                 fontSize: 14,
-                color: Colors.white.withOpacity(0.6),
+                color: Colors.white.withValues(alpha: 0.6),
                 fontWeight: FontWeight.w400,
               ),
             ),

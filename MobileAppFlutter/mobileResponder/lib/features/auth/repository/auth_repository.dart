@@ -50,10 +50,10 @@ class AuthRepository {
         'badgeId': badgeId.trim(),
         'department': department,
         if (phone != null && phone.trim().isNotEmpty) 'phone': phone.trim(),
-        if (agencyType != null) 'agencyType': agencyType,
-        if (stationName != null) 'stationName': stationName,
-        if (position != null) 'position': position,
-        if (coverageArea != null) 'coverageArea': coverageArea,
+        'agencyType': ?agencyType,
+        'stationName': ?stationName,
+        'position': ?position,
+        'coverageArea': ?coverageArea,
         if (faceFile != null)
           'faceCapture': await MultipartFile.fromFile(faceFile.path, filename: 'face.jpg'),
         if (credFile != null)

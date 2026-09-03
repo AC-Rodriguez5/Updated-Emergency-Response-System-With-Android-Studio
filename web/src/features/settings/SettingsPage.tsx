@@ -114,7 +114,7 @@ export default function SettingsPage() {
           {section === 'support' && (
             <SectionWrapper title="Support">
               <p className="text-slate-500 text-sm">
-                For technical support, contact the SafeAlert development team or the Tanza MDRRMO IT
+                For technical support, contact the TanzAlert development team or the Tanza MDRRMO IT
                 coordinator.
               </p>
               <p className="text-slate-500 text-sm mt-2">MDRRMO Hotline: +6346-422-2100</p>
@@ -391,13 +391,13 @@ function SystemMaintenanceSection() {
       subtitle="Status snapshot. Detailed admin tooling lives in the Overview dashboard."
     >
       <div className="space-y-3 text-sm">
-        <Row label="App version" value="SafeAlert 1.0" />
+        <Row label="App version" value="TanzAlert 1.0" />
         <Row label="Backend" value="Node.js + Express + MongoDB Atlas" />
         <Row label="Map provider" value="OpenStreetMap" />
         <Row label="Last backup" value="Not available" />
       </div>
       <p className="text-xs text-slate-400 mt-4">
-        For backup, IoT firmware updates, or manual data exports, contact the SafeAlert development team.
+        For backup, IoT firmware updates, or manual data exports, contact the TanzAlert development team.
       </p>
     </SectionWrapper>
   );

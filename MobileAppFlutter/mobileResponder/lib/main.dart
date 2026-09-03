@@ -9,17 +9,17 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Hive.initFlutter();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
-  runApp(const ProviderScope(child: SafeAlertResponderApp()));
+  runApp(const ProviderScope(child: TanzAlertResponderApp()));
 }
 
-class SafeAlertResponderApp extends ConsumerWidget {
-  const SafeAlertResponderApp({super.key});
+class TanzAlertResponderApp extends ConsumerWidget {
+  const TanzAlertResponderApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(appRouterProvider);
     return MaterialApp.router(
-      title: 'SafeAlert Responder',
+      title: 'TanzAlert Responder',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       routerConfig: router,

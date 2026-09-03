@@ -180,7 +180,7 @@ export function UserDashboard({ onLogout }: Props) {
             <div className="space-y-4">
               <div className="p-4 bg-gray-50 rounded-lg">
                 <h3 className="mb-2">About</h3>
-                <p className="text-gray-600">SafeAlert Emergency System</p>
+                <p className="text-gray-600">TanzAlert Emergency System</p>
                 <p className="text-gray-600">Version 1.0.0</p>
               </div>
               

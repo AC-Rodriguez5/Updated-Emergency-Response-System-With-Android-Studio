@@ -1,9 +1,29 @@
-node_modulesdist
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+**/dist/
+build/
+.dart_tool/
+.gradle/
+
+# Env files (never commit real secrets)
 .env
-.env.local
+.env.*
+!.env.example
+
+# Editor / tool local settings
+.codex/settings.local.json
+.vscode/settings.json
+.idea/
+
+# Logs
 *.log
+
+# OS
 .DS_Store
-node_modules
+Thumbs.db
 
 # Cloudflare tunnel (local-only)
 tools/cloudflared.exe

@@ -139,7 +139,7 @@ class _MapCard extends StatelessWidget {
         children: [
           TileLayer(
             urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-            userAgentPackageName: 'com.safealert.app',
+            userAgentPackageName: 'com.tanzalert.app',
           ),
           if (pickup != null && dropoff != null)
             PolylineLayer(polylines: [

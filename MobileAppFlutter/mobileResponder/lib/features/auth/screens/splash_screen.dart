@@ -22,8 +22,11 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
     final state = ref.read(authStateProvider);
     if (state is AuthAuthenticated) {
       context.go('/duty');
-    } else if (state is AuthPending) context.go('/pending');
-    else context.go('/login');
+    } else if (state is AuthPending) {
+      context.go('/pending');
+    } else {
+      context.go('/login');
+    }
   }
 
   @override
@@ -32,8 +35,11 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
       if (!mounted) return;
       if (next is AuthAuthenticated) {
         context.go('/duty');
-      } else if (next is AuthPending) context.go('/pending');
-      else if (next is AuthUnauthenticated) context.go('/login');
+      } else if (next is AuthPending) {
+        context.go('/pending');
+      } else if (next is AuthUnauthenticated) {
+        context.go('/login');
+      }
     });
     return Scaffold(
       backgroundColor: AppColors.adminNavy,
@@ -47,7 +53,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
               child: const Icon(Icons.local_police, color: Colors.white, size: 48),
             ),
             const SizedBox(height: 24),
-            const Text('SafeAlert', style: TextStyle(fontSize: 32, fontWeight: FontWeight.w900, color: Colors.white)),
+            const Text('TanzAlert', style: TextStyle(fontSize: 32, fontWeight: FontWeight.w900, color: Colors.white)),
             const SizedBox(height: 8),
             Text('Responder App', style: TextStyle(fontSize: 14, color: Colors.white.withValues(alpha: 0.6))),
             const SizedBox(height: 64),

@@ -1,4 +1,4 @@
-package com.safealert.mobile_user
+package com.tanzalert.mobile_user
 
 import io.flutter.embedding.android.FlutterActivity
 

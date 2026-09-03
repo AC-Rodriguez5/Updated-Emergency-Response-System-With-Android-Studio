@@ -99,7 +99,10 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
     setState(() => _resolvingAddress = true);
     String? label;
     try {
-      final placemarks = await placemarkFromCoordinates(point.latitude, point.longitude);
+      final placemarks = await Geocoding().placemarkFromCoordinates(
+        point.latitude,
+        point.longitude,
+      );
       if (placemarks.isNotEmpty) {
         final p = placemarks.first;
         label = [
@@ -260,7 +263,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                   children: [
                     TileLayer(
                       urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName: 'com.safealert.app',
+                      userAgentPackageName: 'com.tanzalert.app',
                     ),
                     if (_selected != null)
                       MarkerLayer(markers: [

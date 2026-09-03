@@ -9,7 +9,7 @@
     </mxCell>
 
     <!-- TITLE -->
-    <mxCell id="title" value="Smart Emergency Alert System  —  SafeAlert Tanza MDRRMO" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=22;fontStyle=1;fontColor=#000000;" vertex="1" parent="1">
+    <mxCell id="title" value="Smart Emergency Alert System  —  TanzAlert Tanza MDRRMO" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=22;fontStyle=1;fontColor=#000000;" vertex="1" parent="1">
       <mxGeometry x="100" y="22" width="2200" height="34" as="geometry" />
     </mxCell>
     <mxCell id="subtitle" value="Deployment Diagram" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=13;fontColor=#000000;" vertex="1" parent="1">

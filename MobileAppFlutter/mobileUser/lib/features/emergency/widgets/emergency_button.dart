@@ -43,9 +43,9 @@ class EmergencyTypeButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.08),
+          color: color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: color.withOpacity(0.25), width: 1.5),
+          border: Border.all(color: color.withValues(alpha: 0.25), width: 1.5),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,

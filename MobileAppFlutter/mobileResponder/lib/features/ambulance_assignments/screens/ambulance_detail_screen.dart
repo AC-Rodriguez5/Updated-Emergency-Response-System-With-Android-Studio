@@ -86,7 +86,7 @@ class _AmbulanceDetailScreenState extends ConsumerState<AmbulanceDetailScreen> {
                           children: [
                             TileLayer(
                               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                              userAgentPackageName: 'com.safealert.app',
+                              userAgentPackageName: 'com.tanzalert.app',
                             ),
                             MarkerLayer(markers: [
                               Marker(point: LatLng(req.pickupLat, req.pickupLng), child: const Icon(Icons.location_on, color: AppColors.successGreen, size: 32)),

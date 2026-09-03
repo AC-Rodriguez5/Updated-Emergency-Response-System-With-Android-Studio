@@ -41,7 +41,7 @@ class _RouteGuidanceScreenState extends State<RouteGuidanceScreen> {
               children: [
                 TileLayer(
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.safealert.app',
+                  userAgentPackageName: 'com.tanzalert.app',
                 ),
                 MarkerLayer(markers: [
                   Marker(

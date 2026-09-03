@@ -23,7 +23,7 @@ const envSchema = z.object({
   BODY_LIMIT: z.string().default('1mb'),
   ADMIN_EMAIL: z.string().email(),
   ADMIN_PASSWORD: z.string().min(8, 'ADMIN_PASSWORD must be at least 8 chars'),
-  ADMIN_NAME: z.string().default('SafeAlert Admin'),
+  ADMIN_NAME: z.string().default('TanzAlert Admin'),
 });
 
 export type Env = z.infer<typeof envSchema>;

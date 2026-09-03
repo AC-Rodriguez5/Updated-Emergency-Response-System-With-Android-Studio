@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 // Type-level tests — verifying our DTO structure is well-formed
 // These are compile-time checks that also run at test time
 
-describe('SafeAlert types structure', () => {
+describe('TanzAlert types structure', () => {
   it('Emergency priority values are the expected set', () => {
     const validPriorities = ['low', 'medium', 'high', 'critical'];
     expect(validPriorities).toHaveLength(4);

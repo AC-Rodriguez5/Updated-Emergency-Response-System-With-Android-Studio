@@ -248,7 +248,7 @@ class _RegistrationStep1ScreenState extends State<RegistrationStep1Screen> {
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'SafeAlert primarily serves Tanza Municipality. Outside-Tanza requests require admin review.',
+                          'TanzAlert primarily serves Tanza Municipality. Outside-Tanza requests require admin review.',
                           style: TextStyle(fontSize: 12, color: AppColors.warningAmber),
                         ),
                       ),

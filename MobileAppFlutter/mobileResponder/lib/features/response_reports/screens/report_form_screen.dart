@@ -32,6 +32,7 @@ class _ReportFormScreenState extends ConsumerState<ReportFormScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    final messenger = ScaffoldMessenger.of(context);
     setState(() => _loading = true);
     try {
       final fullNote = 'Situation: ${_situationCtrl.text}\nActions: ${_actionCtrl.text}\nNotes: ${_notesCtrl.text}';
@@ -39,7 +40,7 @@ class _ReportFormScreenState extends ConsumerState<ReportFormScreen> {
       setState(() => _submitted = true);
       if (mounted) Future.delayed(const Duration(seconds: 1), () { if (mounted) context.pop(); });
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -69,8 +70,15 @@ class _ReportFormScreenState extends ConsumerState<ReportFormScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: _confirmLeave,
+    return PopScope<Object?>(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        final shouldPop = await _confirmLeave();
+        if (shouldPop && context.mounted) {
+          Navigator.of(context).pop(result);
+        }
+      },
       child: Scaffold(
       appBar: AppBar(
         leading: IconButton(

@@ -24,17 +24,17 @@ void main() async {
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
-  runApp(const ProviderScope(child: SafeAlertApp()));
+  runApp(const ProviderScope(child: TanzAlertApp()));
 }
 
-class SafeAlertApp extends ConsumerStatefulWidget {
-  const SafeAlertApp({super.key});
+class TanzAlertApp extends ConsumerStatefulWidget {
+  const TanzAlertApp({super.key});
 
   @override
-  ConsumerState<SafeAlertApp> createState() => _SafeAlertAppState();
+  ConsumerState<TanzAlertApp> createState() => _TanzAlertAppState();
 }
 
-class _SafeAlertAppState extends ConsumerState<SafeAlertApp>
+class _TanzAlertAppState extends ConsumerState<TanzAlertApp>
     with WidgetsBindingObserver {
   StreamSubscription? _syncSub;
   io.Socket? _emergencySocket;
@@ -156,7 +156,7 @@ class _SafeAlertAppState extends ConsumerState<SafeAlertApp>
 
     final router = ref.watch(appRouterProvider);
     return MaterialApp.router(
-      title: 'SafeAlert',
+      title: 'TanzAlert',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       routerConfig: router,

@@ -60,7 +60,7 @@ export default function UserAuth({ onLogin, onSwitchRole }: Props) {
           </svg>
         </div>
         <h2 className="text-2xl font-semibold mb-1">Welcome Back</h2>
-        <p className="text-gray-500 mb-6">Log in to your SafeAlert account</p>
+        <p className="text-gray-500 mb-6">Log in to your TanzAlert account</p>
       </div>
 
       {success && <div className="mb-4 text-green-600">{success}</div>}

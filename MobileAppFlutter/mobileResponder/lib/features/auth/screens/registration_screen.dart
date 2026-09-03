@@ -7,7 +7,6 @@ import 'package:image_picker/image_picker.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/app_input.dart';
-import '../providers/auth_provider.dart';
 import '../repository/auth_repository.dart';
 import '../../../core/networking/api_exception.dart';
 

@@ -141,7 +141,7 @@ class _RegistrationStep2ScreenState extends ConsumerState<RegistrationStep2Scree
                   SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'Your account requires admin approval before you can use SafeAlert. You will be notified once reviewed.',
+                      'Your account requires admin approval before you can use TanzAlert. You will be notified once reviewed.',
                       style: TextStyle(fontSize: 12, color: AppColors.responderBlue),
                     ),
                   ),

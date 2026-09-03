@@ -18,7 +18,7 @@ class NominatimService {
           baseUrl: 'https://nominatim.openstreetmap.org',
           headers: {
             // Nominatim usage policy requires a descriptive User-Agent.
-            'User-Agent': 'SafeAlert-MobileUser/1.0 (Tanza MDRRMO)',
+            'User-Agent': 'TanzAlert-MobileUser/1.0 (Tanza MDRRMO)',
           },
           connectTimeout: const Duration(seconds: 8),
           receiveTimeout: const Duration(seconds: 8),

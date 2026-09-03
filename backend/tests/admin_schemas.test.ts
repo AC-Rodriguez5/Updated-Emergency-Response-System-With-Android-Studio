@@ -8,7 +8,7 @@ import { listAdminQuerySchema } from '../src/modules/ambulance/ambulance.schemas
 describe('createResponderSchema', () => {
   const base = {
     name: 'Maria Santos',
-    email: 'maria@safealert.test',
+    email: 'maria@tanzalert.test',
     password: 'password123',
     phone: '+63917000010',
     streetAddress: '21 MDRRMO Drive, Tanza',

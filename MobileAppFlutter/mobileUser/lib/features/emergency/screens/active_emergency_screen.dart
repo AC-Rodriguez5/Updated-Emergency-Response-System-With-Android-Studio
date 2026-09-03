@@ -207,7 +207,7 @@ class _ActiveEmergencyScreenState extends ConsumerState<ActiveEmergencyScreen> {
                       TileLayer(
                         urlTemplate:
                             'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                        userAgentPackageName: 'com.safealert.app',
+                        userAgentPackageName: 'com.tanzalert.app',
                       ),
                       MarkerLayer(
                         markers: [

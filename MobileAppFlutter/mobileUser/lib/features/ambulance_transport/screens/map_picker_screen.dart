@@ -66,7 +66,9 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
         perm = await Geolocator.requestPermission();
       }
       if (perm == LocationPermission.denied ||
-          perm == LocationPermission.deniedForever) return;
+          perm == LocationPermission.deniedForever) {
+        return;
+      }
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
@@ -150,7 +152,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
               TileLayer(
                 urlTemplate:
                     'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.safealert.user',
+                userAgentPackageName: 'com.tanzalert.user',
               ),
             ],
           ),

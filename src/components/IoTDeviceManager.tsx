@@ -84,7 +84,7 @@ export function IoTDeviceManager({ device, onDeviceChange, isOffline }: Props) {
       if (!device) {
         const mockDevice: IoTDevice = {
           id: 'iot_panic_001',
-          name: 'SafeAlert Panic Button',
+          name: 'TanzAlert Panic Button',
           model: 'SAB-2024',
           batteryLevel: 85,
           signalStrength: 92,

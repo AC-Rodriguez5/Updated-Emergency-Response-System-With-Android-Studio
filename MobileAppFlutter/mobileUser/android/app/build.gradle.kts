@@ -6,22 +6,18 @@ plugins {
 }
 
 android {
-    namespace = "com.safealert.mobile_user"
+    namespace = "com.tanzalert.mobile_user"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_24
+        targetCompatibility = JavaVersion.VERSION_24
         isCoreLibraryDesugaringEnabled = true
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
-    }
-
     defaultConfig {
-        applicationId = "com.safealert.mobile_user"
+        applicationId = "com.tanzalert.mobile_user"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -42,5 +38,14 @@ flutter {
 }
 
 dependencies {
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+    implementation("androidx.concurrent:concurrent-futures:1.2.0")
+}
+
+// Kotlin JVM target must match compileOptions above (Java 24).
+// Uses the KGP compilerOptions DSL; android.kotlinOptions is deprecated in Kotlin 2.x.
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_24)
+    }
 }

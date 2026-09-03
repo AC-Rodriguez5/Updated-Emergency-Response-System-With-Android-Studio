@@ -236,7 +236,7 @@ export default function ResponderLogin({ onLogin }: Props) {
 
         {/* Footer */}
         <div className="text-center mt-6 text-blue-300/60 text-sm">
-          <p>SafeAlert Emergency Response System</p>
+          <p>TanzAlert Emergency Response System</p>
           <p className="mt-1">For authorized responders only</p>
         </div>
       </div>

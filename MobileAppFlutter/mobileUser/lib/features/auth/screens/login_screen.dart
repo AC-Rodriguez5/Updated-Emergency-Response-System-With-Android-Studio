@@ -80,7 +80,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 const Text('Welcome back', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
                 const SizedBox(height: 4),
                 const Text(
-                  'Sign in to SafeAlert — Tanza MDRRMO',
+                  'Sign in to TanzAlert — Tanza MDRRMO',
                   style: TextStyle(fontSize: 14, color: AppColors.textMuted),
                 ),
                 const SizedBox(height: 40),

@@ -34,7 +34,7 @@ export default function LoginPage() {
           <Shield className="w-8 h-8 text-white" />
         </div>
         <h1 className="text-4xl font-black text-white text-center leading-tight">
-          SafeAlert<br />Command Center
+          TanzAlert<br />Command Center
         </h1>
         <p className="text-white/50 mt-4 text-center max-w-xs">
           Tanza MDRRMO Emergency Response Administration
@@ -60,7 +60,7 @@ export default function LoginPage() {
             <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center">
               <Shield className="w-5 h-5 text-white" />
             </div>
-            <span className="text-xl font-bold text-slate-900">SafeAlert Admin</span>
+            <span className="text-xl font-bold text-slate-900">TanzAlert Admin</span>
           </div>
 
           <h2 className="text-2xl font-black text-slate-900 mb-2">Sign in to Admin Console</h2>
@@ -79,7 +79,7 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                placeholder="admin@safealert.local"
+                placeholder="admin@tanzalert.local"
                 className="w-full border border-slate-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
               />
             </div>

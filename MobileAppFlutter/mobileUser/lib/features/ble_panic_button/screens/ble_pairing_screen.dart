@@ -26,7 +26,7 @@ class BlePairingScreen extends ConsumerWidget {
               const Text('How to pair', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
               const SizedBox(height: 8),
               const Text(
-                '1. Turn on your SafeAlert keychain (press the switch).\n'
+                '1. Turn on your TanzAlert keychain (press the switch).\n'
                 '2. Hold it near your phone.\n'
                 '3. Tap "Scan for Keychain" below.',
                 style: TextStyle(fontSize: 14, color: AppColors.textMuted, height: 1.6),
@@ -37,9 +37,10 @@ class BlePairingScreen extends ConsumerWidget {
                 onPressed: ble.connection == BleConnectionState.scanning
                     ? null
                     : () async {
+                        final messenger = ScaffoldMessenger.of(context);
                         final btState = await FlutterBluePlus.adapterState.first;
                         if (btState != BluetoothAdapterState.on) {
-                          ScaffoldMessenger.of(context).showSnackBar(
+                          messenger.showSnackBar(
                             const SnackBar(content: Text('Please enable Bluetooth first.')),
                           );
                           return;
@@ -106,7 +107,7 @@ class _DeviceCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            isConnected ? (ble.deviceName ?? 'SafeAlert Keychain') : 'No keychain paired',
+            isConnected ? (ble.deviceName ?? 'TanzAlert Keychain') : 'No keychain paired',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w700,
@@ -164,9 +165,9 @@ class _KeychainButton extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.2)),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,

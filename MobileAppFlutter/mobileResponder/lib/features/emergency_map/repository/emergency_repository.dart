@@ -2,7 +2,6 @@ import 'dart:developer' as developer;
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/networking/api_client.dart';
-import '../../../core/networking/api_exception.dart';
 import '../models/emergency_model.dart';
 
 final emergencyRepositoryProvider = Provider<EmergencyRepository>((ref) => EmergencyRepository(ref.read(dioProvider)));

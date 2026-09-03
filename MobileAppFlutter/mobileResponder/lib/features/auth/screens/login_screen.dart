@@ -60,7 +60,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 const SizedBox(height: 24),
                 const Text('Responder Sign In', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
                 const SizedBox(height: 4),
-                const Text('SafeAlert — Tanza MDRRMO Responder Portal', style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
+                const Text('TanzAlert — Tanza MDRRMO Responder Portal', style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
                 const SizedBox(height: 40),
                 if (_error != null) ...[
                   Container(

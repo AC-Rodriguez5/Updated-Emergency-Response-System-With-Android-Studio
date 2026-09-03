@@ -23,7 +23,7 @@ class EmergencyHomeScreen extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              user?.name ?? 'SafeAlert',
+              user?.name ?? 'TanzAlert',
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
             ),
             Text(
@@ -114,7 +114,7 @@ class _ActiveEmergencyBanner extends StatelessWidget {
         decoration: BoxDecoration(
           color: AppColors.softRed,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.alertRed.withOpacity(0.3)),
+          border: Border.all(color: AppColors.alertRed.withValues(alpha: 0.3)),
         ),
         child: Row(
           children: [
@@ -196,9 +196,9 @@ class _AmbulanceTypeChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.08),
+          color: color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: color.withOpacity(0.25)),
+          border: Border.all(color: color.withValues(alpha: 0.25)),
         ),
         child: Center(
           child: Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color)),

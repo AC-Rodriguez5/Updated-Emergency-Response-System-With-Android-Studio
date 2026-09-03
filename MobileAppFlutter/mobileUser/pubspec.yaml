@@ -1,5 +1,5 @@
 name: mobile_user
-description: SafeAlert Emergency Response — User App (Tanza Municipality, Cavite)
+description: TanzAlert Emergency Response — User App (Tanza Municipality, Cavite)
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -36,7 +36,7 @@ dependencies:
 
   # GPS
   geolocator: ^13.0.2
-  geocoding: ^3.0.0
+  geocoding: ^5.0.0
 
   # Background service (foreground service for BLE + location)
   flutter_background_service: ^5.0.9

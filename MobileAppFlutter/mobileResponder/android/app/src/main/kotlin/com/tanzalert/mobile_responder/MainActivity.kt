@@ -1,4 +1,4 @@
-package com.safealert.mobile_responder
+package com.tanzalert.mobile_responder
 
 import io.flutter.embedding.android.FlutterActivity
 
