@@ -1,0 +1,7 @@
+import { useState } from 'react';
+import { useAuth } from '@/store/AuthContext';
+import { Detail, PageHeader, Select } from '@/components/UI';
+export default function Settings() {
+  const { account } = useAuth(); const [density, setDensity] = useState(localStorage.getItem('safealert.density') || 'comfortable');
+  return <><PageHeader title="Settings" description="Manage display preferences for this browser and review your account session." /><section className="panel settings-panel"><h2>Display</h2><Select label="Table density" value={density} onChange={event => { setDensity(event.target.value); localStorage.setItem('safealert.density', event.target.value); document.documentElement.dataset.density = event.target.value; }}><option value="comfortable">Comfortable</option><option value="compact">Compact</option></Select><p className="muted small" role="status">Display preferences are saved on this browser.</p></section><section className="panel settings-panel"><h2>Administrator session</h2><dl className="detail-grid"><Detail label="Name">{account?.name}</Detail><Detail label="Email">{account?.email}</Detail><Detail label="Role">Administrator</Detail><Detail label="Session storage">This browser tab only</Detail><Detail label="Timezone">Philippine Standard Time · UTC+08:00</Detail><Detail label="Language">English (Philippines)</Detail></dl><p className="muted">To change account permissions or credentials, contact your system administrator. Use Sign out when you finish.</p></section></>;
+}

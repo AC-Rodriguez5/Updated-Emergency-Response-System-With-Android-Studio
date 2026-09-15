@@ -1,0 +1,28 @@
+﻿2026-09-11 19.00.11 [ERROR]
+System.InvalidOperationException: The IP24V3 external monitor is not connected or active.
+   at ExternalMonitorColorFix.FindTargetMonitor()
+   at ExternalMonitorColorFix.Main(String[] args)
+
+2026-09-11 19.00.44 [ERROR]
+System.InvalidOperationException: The IP24V3 external monitor is not connected or active.
+Detected displays:
+\\.\DISPLAY1 | Intel(R) UHD Graphics | Generic PnP Monitor \\?\DISPLAY#BOE0D39#4&26f2ef5b&0&UID8388688#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}
+   at ExternalMonitorColorFix.FindTargetMonitor()
+   at ExternalMonitorColorFix.Main(String[] args)
+
+2026-09-11 19.02.36 [ERROR]
+System.ComponentModel.Win32Exception (0x80004005): Windows could not associate the sRGB profile with the external monitor.
+   at ExternalMonitorColorFix.Main(String[] args)
+
+2026-09-11 19.04.33 [ERROR]
+System.ComponentModel.Win32Exception (0x80004005): Windows could not associate the sRGB profile with the external monitor.
+   at ExternalMonitorColorFix.Main(String[] args)
+
+2026-09-11 19.05.31 [ERROR]
+System.ComponentModel.Win32Exception (0x80004005): Windows could not associate the sRGB profile with the external monitor. Error code: 5.
+   at ExternalMonitorColorFix.Main(String[] args)
+
+2026-09-11 19.06.19 [ERROR]
+System.ComponentModel.Win32Exception (0x80004005): Windows could not associate the sRGB profile with the external monitor. Error code: 5.
+   at ExternalMonitorColorFix.Main(String[] args)
+

@@ -1,0 +1,12 @@
+import { Router } from 'express';
+import { requireAuth,requireRole } from '../middleware/authMiddleware.ts';
+import { adminLimiter } from '../middleware/rateLimitMiddleware.ts';
+import { getPendingRegistrations,getRegistration,approveRegistration,rejectRegistration,suspendAccount } from '../controllers/adminController.ts';
+const router=Router();
+router.use(requireAuth,requireRole(['admin']));
+router.get('/registrations',getPendingRegistrations);
+router.get('/registrations/:id',getRegistration);
+router.post('/registrations/:id/approve',adminLimiter,approveRegistration);
+router.post('/registrations/:id/reject',adminLimiter,rejectRegistration);
+router.post('/accounts/:id/suspend',adminLimiter,suspendAccount);
+export default router;

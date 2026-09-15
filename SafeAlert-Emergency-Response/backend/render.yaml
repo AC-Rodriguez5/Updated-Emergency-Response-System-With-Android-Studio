@@ -1,11 +1,12 @@
 services:
   - type: web
-    name: emergency-response-backend
+    name: safealert-backend
     runtime: node
     region: oregon
-    plan: free
-    buildCommand: npm install && npm run build
+    rootDir: SafeAlert-Emergency-Response/backend
+    buildCommand: npm ci && npm run build
     startCommand: npm start
+    healthCheckPath: /ready
     envVars:
       - key: MONGODB_URI
         sync: false
@@ -13,3 +14,11 @@ services:
         sync: false
       - key: NODE_ENV
         value: production
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: FCM_ENABLED
+        value: 'true'
+      - key: OVERPASS_URL
+        sync: false
+      - key: ROUTING_URL
+        sync: false

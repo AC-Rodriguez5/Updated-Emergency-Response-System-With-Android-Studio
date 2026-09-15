@@ -1,0 +1,16 @@
+import { Router } from 'express';
+import { requireAuth, requireRole } from '../middleware/authMiddleware.ts';
+import { apiLimiter, emergencyLimiter } from '../middleware/rateLimitMiddleware.ts';
+import * as c from '../controllers/emergencyController.ts';
+const router=Router();router.use(requireAuth);
+router.post('/',requireRole(['user']),emergencyLimiter,c.createEmergency);
+router.use(apiLimiter);
+router.get('/active',requireRole(['admin','responder']),c.getActiveEmergencies);
+router.get('/my',requireRole(['user']),c.myEmergencies);
+router.get('/:id',c.getEmergency);
+router.get('/:id/location-history',c.locationHistory);
+router.post('/:id/cancel',requireRole(['user']),c.cancelEmergency);
+router.post('/:id/assign',requireRole(['responder']),c.claimEmergency);
+router.post('/:id/on-the-way',requireRole(['responder']),c.markOnTheWay);
+router.post('/:id/report',requireRole(['responder']),c.submitReport);
+export default router;

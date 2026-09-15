@@ -1,0 +1,11 @@
+import { Router } from 'express';
+import { requireAuth,requireRole } from '../middleware/authMiddleware.ts';
+import { apiLimiter,emergencyLimiter } from '../middleware/rateLimitMiddleware.ts';
+import { pairDevice,getMyDevices,unpairDevice } from '../controllers/bleController.ts';
+import { createEmergency } from '../controllers/emergencyController.ts';
+import { ApiError } from '../shared/http.ts';
+const router=Router();router.use(requireAuth,requireRole(['user']));
+router.post('/ble-events',emergencyLimiter,(req,_res,next)=>req.body?.source==='iot_ble'?next():next(new ApiError(400,'INVALID_SOURCE','BLE events require the IoT source.')),createEmergency);
+router.use(apiLimiter);
+router.get('/ble-devices',getMyDevices);router.post('/ble-devices/pair',pairDevice);router.post('/ble-devices/:id/unpair',unpairDevice);
+export default router;

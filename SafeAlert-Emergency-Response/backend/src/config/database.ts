@@ -1,29 +1,7 @@
 import mongoose from 'mongoose';
-
-export const connectDatabase = async () => {
-  try {
-    const mongoUri = process.env.MONGODB_URI;
-    
-    if (!mongoUri) {
-      throw new Error('MONGODB_URI is not defined in environment variables');
-    }
-
-    await mongoose.connect(mongoUri);
-    
-    console.log('✅ Connected to MongoDB Atlas');
-    
-    mongoose.connection.on('error', (err) => {
-      console.error('MongoDB connection error:', err);
-    });
-
-    mongoose.connection.on('disconnected', () => {
-      console.log('⚠️ MongoDB disconnected');
-    });
-
-  } catch (error) {
-    console.error('❌ Failed to connect to MongoDB:', error);
-    process.exit(1);
-  }
-};
-
-export default mongoose;
+import { env } from './environment.ts';
+export async function connectDatabase(): Promise<void> {
+  await mongoose.connect(env.MONGODB_URI, { serverSelectionTimeoutMS: 10000, autoIndex: env.NODE_ENV !== 'production' });
+  mongoose.connection.on('error', () => console.error('MongoDB connection error; inspect database health.'));
+  console.info('MongoDB connected.');
+}

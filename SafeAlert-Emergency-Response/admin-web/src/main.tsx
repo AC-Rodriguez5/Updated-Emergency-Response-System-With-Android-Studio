@@ -1,0 +1,10 @@
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
+import { AuthProvider } from './store/AuthContext';
+import App from './App';
+import './index.css';
+document.documentElement.lang = 'en-PH';
+document.documentElement.dataset.density = localStorage.getItem('safealert.density') || 'comfortable';
+ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><BrowserRouter><AuthProvider><App /><Toaster position="top-right" toastOptions={{ duration: 5000, className: 'app-toast' }} /></AuthProvider></BrowserRouter></React.StrictMode>);

@@ -1,0 +1,13 @@
+import { Router } from 'express';
+import { createRegistrationSession,registerUser,registerResponder,login,refresh,logout,me } from '../controllers/authController.ts';
+import { requireAuth,identifyRefreshAccount } from '../middleware/authMiddleware.ts';
+import { registrationSessionLimiter,registerLimiter,loginLimiter,refreshLimiter,refreshIpLimiter,logoutLimiter } from '../middleware/rateLimitMiddleware.ts';
+const router=Router();
+router.post('/registration-session',registrationSessionLimiter,createRegistrationSession);
+router.post('/register/user',registerLimiter,registerUser);
+router.post('/register/responder',registerLimiter,registerResponder);
+router.post('/login',loginLimiter,login);
+router.post('/refresh',refreshIpLimiter,identifyRefreshAccount,refreshLimiter,refresh);
+router.post('/logout',refreshIpLimiter,identifyRefreshAccount,logoutLimiter,logout);
+router.get('/me',requireAuth,me);
+export default router;

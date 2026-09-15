@@ -1,0 +1,10 @@
+import { Router } from 'express';
+import { requireAuth,requireRole,requireRegistrationSession } from '../middleware/authMiddleware.ts';
+import { uploadLimiter } from '../middleware/rateLimitMiddleware.ts';
+import { uploadMiddleware } from '../middleware/uploadMiddleware.ts';
+import { uploadDocument,getDocument,uploadResponsePhoto } from '../controllers/uploadController.ts';
+const router=Router();
+router.post('/',requireRegistrationSession,uploadLimiter,uploadMiddleware.single('file'),uploadDocument);
+router.post('/response-photo',requireAuth,requireRole(['responder']),uploadLimiter,uploadMiddleware.single('file'),uploadResponsePhoto);
+router.get('/:id',requireAuth,getDocument);
+export default router;

@@ -1,0 +1,10 @@
+import { Router } from 'express';
+import { requireAuth, requireRole } from '../middleware/authMiddleware.ts';
+import { locationLimiter, apiLimiter } from '../middleware/rateLimitMiddleware.ts';
+import { logLocation,liveResponders,setDuty } from '../controllers/emergencyController.ts';
+export const locationRoutes=Router();locationRoutes.use(requireAuth,locationLimiter);
+locationRoutes.post('/user',requireRole(['user']),logLocation);
+locationRoutes.post('/responder',requireRole(['responder']),logLocation);
+export const responderRoutes=Router();responderRoutes.use(requireAuth,apiLimiter);
+responderRoutes.get('/locations/live',requireRole(['admin']),liveResponders);
+responderRoutes.patch('/me/duty',requireRole(['responder']),setDuty);

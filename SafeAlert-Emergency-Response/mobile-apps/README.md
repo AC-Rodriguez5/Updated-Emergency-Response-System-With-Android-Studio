@@ -1,0 +1,9 @@
+# Maintained Android applications
+
+User and Responder are Flutter role applications sharing `shared/`. Previous Flutter source is preserved in `migration_reference/`; Expo is a migration reference only. Use Flutter 3.41.9, Java 17 and the Android SDK. Run `flutter pub get`, `flutter analyze`, `flutter test`, and `flutter build apk --debug` in each app. Run analysis and tests in `shared/` too.
+
+For an Android emulator, the default API is `http://10.0.2.2:5000/api`. On a physical device pass `--dart-define=API_BASE_URL=https://your-api.example/api`. Release manifests forbid cleartext HTTP. Configure Firebase independently for each application's Android ID using `FIREBASE_API_KEY`, `FIREBASE_APP_ID`, `FIREBASE_SENDER_ID`, and `FIREBASE_PROJECT_ID` dart defines. Missing Firebase configuration is shown in the app; it does not imply successful push delivery.
+
+Registration captures private evidence, then requires administrator approval. Manual SOS requires an explicit hold or confirmation and actual GPS. Retry keys and pending attempts are persisted per account; the server owns incident IDs. Cancellation and resolution are confirmed by the server. Background location and BLE monitoring require the Android permissions and an ongoing foreground-service notification. Force-stop and denied permissions can interrupt monitoring and must be covered in device acceptance tests.
+
+Before a release, configure a protected upload keystore in the release pipeline for each app; no debug signing fallback is provided. Keep `key.properties`, keystores and operational secrets out of Git. Test Firebase delivery on a locked phone, process recreation, BLE reconnection, queue recovery, real GPS and battery behavior before operational deployment. A compiled debug APK is not a signed production release.

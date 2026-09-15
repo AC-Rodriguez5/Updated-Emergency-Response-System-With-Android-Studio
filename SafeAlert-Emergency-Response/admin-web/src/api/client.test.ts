@@ -1,0 +1,22 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError, clearSession, currentSession, login, refreshSession, request, setSession } from './index';
+import type { AuthSession } from '@/types';
+const account = { id: 'admin-1', name: 'Test Administrator', email: 'admin@example.test', role: 'admin' as const, status: 'approved' as const };
+const initial: AuthSession = { accessToken: 'access-old', refreshToken: 'refresh-old', account };
+class MemoryStorage { values = new Map<string, string>(); getItem(key: string) { return this.values.get(key) ?? null; } setItem(key: string, value: string) { this.values.set(key, value); } removeItem(key: string) { this.values.delete(key); } }
+const response = (data: unknown, status = 200) => new Response(JSON.stringify(status >= 400 ? { error: { code: 'TEST_ERROR', message: 'Request rejected' }, requestId: 'test' } : { data, requestId: 'test' }), { status, headers: { 'Content-Type': 'application/json' } });
+beforeEach(() => { vi.stubGlobal('window', { sessionStorage: new MemoryStorage(), localStorage: new MemoryStorage() }); clearSession(); });
+afterEach(() => { clearSession(); vi.unstubAllGlobals(); });
+describe('administrator API security and recovery', () => {
+  it('stores only the refresh credential in tab-scoped storage', () => { setSession(initial); expect(window.sessionStorage.getItem('safealert.admin.refresh')).toBe('refresh-old'); expect(window.localStorage.getItem('authToken')).toBeNull(); expect(window.sessionStorage.getItem('accessToken')).toBeNull(); });
+  it('rejects a non-admin login response without establishing a session', async () => { vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ ...initial, account: { ...account, role: 'responder' } }))); await expect(login('admin@example.test', 'password')).rejects.toMatchObject({ status: 403 }); expect(currentSession()).toBeNull(); });
+  it('refreshes once when concurrent requests receive 401 and replays with the new access token', async () => {
+    setSession(initial); let rotations = 0; const used: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, options: RequestInit) => { if (url.endsWith('/auth/refresh')) { rotations++; await new Promise(resolve => setTimeout(resolve, 20)); return response({ ...initial, accessToken: 'access-new', refreshToken: 'refresh-new' }); } const bearer = (options.headers as Record<string, string>).Authorization; used.push(bearer); return bearer === 'Bearer access-old' ? response(null, 401) : response({ id: 'incident' }); }));
+    const results = await Promise.all([request('/emergencies/a'), request('/emergencies/b')]); expect(rotations).toBe(1); expect(results).toHaveLength(2); expect(used.filter(value => value === 'Bearer access-new')).toHaveLength(2); expect(window.sessionStorage.getItem('safealert.admin.refresh')).toBe('refresh-new');
+  });
+  it('rejects the original request and clears credentials when rotation is denied', async () => { setSession(initial); vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => response(null, 401))); await expect(request('/admin/analytics/summary')).rejects.toBeInstanceOf(ApiError); expect(currentSession()).toBeNull(); expect(window.sessionStorage.getItem('safealert.admin.refresh')).toBeNull(); });
+  it('does not retry a write whose network outcome is unknown', async () => { setSession(initial); const fetcher = vi.fn().mockRejectedValue(new TypeError('network')); vi.stubGlobal('fetch', fetcher); await expect(request('/admin/emergencies/a/resolve', { method: 'POST', body: '{}' })).rejects.toMatchObject({ code: 'NETWORK_ERROR' }); expect(fetcher).toHaveBeenCalledTimes(1); });
+  it('cannot resurrect a session after sign-out while refresh is pending', async () => { setSession(initial); let release!: (value: Response) => void; vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { release = resolve; }))); const pending = refreshSession(); clearSession(); release(response({ ...initial, accessToken: 'late-access' })); await expect(pending).rejects.toMatchObject({ code: 'SESSION_CHANGED' }); expect(currentSession()).toBeNull(); });
+  it('preserves tab session during a network failure instead of treating it as expired', async () => { setSession(initial); vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('network'))); await expect(refreshSession()).rejects.toMatchObject({ code: 'NETWORK_ERROR' }); expect(currentSession()?.account.id).toBe(account.id); });
+});
