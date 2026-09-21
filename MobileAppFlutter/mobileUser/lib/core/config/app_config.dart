@@ -5,8 +5,10 @@ class AppConfig {
 
   // Pass at build/run time via --dart-define=API_BASE_URL=https://your-tunnel.trycloudflare.com/api
   // Empty string means: fall back to local LAN defaults (dev on same Wi-Fi).
-  static const String _apiBaseUrlOverride =
-      String.fromEnvironment('API_BASE_URL', defaultValue: '');
+  static const String _apiBaseUrlOverride = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: '',
+  );
 
   // Used only when API_BASE_URL is not provided. Set to your laptop's LAN IP.
   static const String _lanDevIp = '192.168.1.10';
@@ -18,9 +20,26 @@ class AppConfig {
   }
 
   static const String serviceUuid = '9f4d0001-7d6a-4b85-9e74-2f4d8e8d0001';
-  static const String buttonCharUuid = '9f4d0002-7d6a-4b85-9e74-2f4d8e8d0002';
+  static const String eventCharUuid = '9f4d0002-7d6a-4b85-9e74-2f4d8e8d0002';
+  static const String buttonCharUuid = eventCharUuid;
   static const String batteryCharUuid = '00002a19-0000-1000-8000-00805f9b34fb';
-  static const String heartbeatCharUuid = '9f4d0003-7d6a-4b85-9e74-2f4d8e8d0003';
+  static const String heartbeatCharUuid =
+      '9f4d0003-7d6a-4b85-9e74-2f4d8e8d0003';
+  static const String configCharUuid = '9f4d0004-7d6a-4b85-9e74-2f4d8e8d0004';
+
+  static const String cellularApn = String.fromEnvironment(
+    'CELLULAR_APN',
+    defaultValue: '',
+  );
+  static const bool modemTlsValidated = bool.fromEnvironment(
+    'MODEM_TLS_VALIDATED',
+    defaultValue: false,
+  );
+
+  static bool get directCellularReady =>
+      apiBaseUrl.startsWith('https://') &&
+      cellularApn.isNotEmpty &&
+      modemTlsValidated;
 
   static const double tanzaMinLat = 14.30;
   static const double tanzaMaxLat = 14.42;

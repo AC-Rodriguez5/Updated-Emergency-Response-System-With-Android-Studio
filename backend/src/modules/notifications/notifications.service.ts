@@ -11,6 +11,7 @@ import {
 const NOTIFY_EMERGENCY_EVENTS = new Set<string>([
   'emergency.created',
   'emergency.iot_keychain_created',
+  'emergency.iot_device_created',
   'emergency.assigned',
   'emergency.resolved',
   'emergency.cancelled',
@@ -37,7 +38,7 @@ function priorityForEmergency(
   emergency: IEmergency,
   event: string,
 ): AdminNotificationPriority {
-  if (event === 'emergency.created' || event === 'emergency.iot_keychain_created') {
+  if (event === 'emergency.created' || event === 'emergency.iot_keychain_created' || event === 'emergency.iot_device_created') {
     return emergency.priority === 'critical' ? 'critical' : 'high';
   }
   return 'normal';
@@ -68,7 +69,9 @@ export async function recordEmergencyNotification(
     const sender = emergency.userSnapshot?.fullName ?? 'A user';
     const typeLabel = HUMAN_EMERGENCY_TYPE[emergency.type] ?? emergency.type;
     const isCreated =
-      event === 'emergency.created' || event === 'emergency.iot_keychain_created';
+      event === 'emergency.created' ||
+      event === 'emergency.iot_keychain_created' ||
+      event === 'emergency.iot_device_created';
     const latestReport = [...emergency.timeline]
       .reverse()
       .find((t) => t.event === 'responder_report');

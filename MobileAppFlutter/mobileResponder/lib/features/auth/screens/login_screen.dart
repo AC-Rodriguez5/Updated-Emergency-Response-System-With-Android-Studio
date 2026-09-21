@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../../core/theme/app_colors.dart';
-import '../../../core/widgets/app_button.dart';
-import '../../../core/widgets/app_input.dart';
+import 'package:safealert_ui/safealert_ui.dart';
 import '../providers/auth_provider.dart';
 import '../../../core/networking/api_exception.dart';
 
@@ -23,15 +21,32 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   String? _error;
 
   @override
-  void dispose() { _emailCtrl.dispose(); _passCtrl.dispose(); super.dispose(); }
+  void dispose() {
+    _emailCtrl.dispose();
+    _passCtrl.dispose();
+    super.dispose();
+  }
 
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
-      await ref.read(authProvider.notifier).login(email: _emailCtrl.text, password: _passCtrl.text, rememberMe: _rememberMe);
+      await ref
+          .read(authProvider.notifier)
+          .login(
+            email: _emailCtrl.text,
+            password: _passCtrl.text,
+            rememberMe: _rememberMe,
+          );
     } on ApiException catch (e) {
-      setState(() => _error = e.isNotApproved ? 'Your account is pending admin approval.' : e.message);
+      setState(
+        () => _error = e.isNotApproved
+            ? 'Your account is pending admin approval.'
+            : e.message,
+      );
     } catch (_) {
       setState(() => _error = 'Login failed. Check your connection.');
     } finally {
@@ -46,52 +61,94 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 40),
-                Container(
-                  width: 56, height: 56,
-                  decoration: BoxDecoration(color: AppColors.responderBlue, borderRadius: BorderRadius.circular(16)),
-                  child: const Icon(Icons.local_police, color: Colors.white, size: 32),
-                ),
-                const SizedBox(height: 24),
-                const Text('Responder Sign In', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
-                const SizedBox(height: 4),
-                const Text('TanzAlert — Tanza MDRRMO Responder Portal', style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
-                const SizedBox(height: 40),
-                if (_error != null) ...[
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(color: AppColors.softRed, borderRadius: BorderRadius.circular(8)),
-                    child: Text(_error!, style: const TextStyle(color: AppColors.alertRed, fontSize: 13)),
+          child: TanzAlertPageEntrance(
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 12),
+                  const TanzAlertAuthHero(
+                    eyebrow: 'Responder operations',
+                    title: 'Return to active duty.',
+                    description:
+                        'Sign in to receive assignments, navigate incidents, and report outcomes.',
+                    icon: Icons.local_police_outlined,
+                  ),
+                  const SizedBox(height: 28),
+                  if (_error != null) ...[
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: AppColors.softRed,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        _error!,
+                        style: const TextStyle(
+                          color: AppColors.alertRed,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  AppInput(
+                    label: 'Email address',
+                    controller: _emailCtrl,
+                    keyboardType: TextInputType.emailAddress,
+                    validator: (v) => v == null || !v.contains('@')
+                        ? 'Enter valid email'
+                        : null,
                   ),
                   const SizedBox(height: 16),
-                ],
-                AppInput(label: 'Email address', controller: _emailCtrl, keyboardType: TextInputType.emailAddress,
-                    validator: (v) => v == null || !v.contains('@') ? 'Enter valid email' : null),
-                const SizedBox(height: 16),
-                AppInput(label: 'Password', controller: _passCtrl, obscureText: _obscure,
-                    suffix: IconButton(icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility), onPressed: () => setState(() => _obscure = !_obscure)),
-                    validator: (v) => v == null || v.isEmpty ? 'Enter password' : null),
-                const SizedBox(height: 12),
-                Row(children: [
-                  Checkbox(value: _rememberMe, onChanged: (v) => setState(() => _rememberMe = v ?? false), activeColor: AppColors.responderBlue),
-                  const Text('Remember me', style: TextStyle(fontSize: 14)),
-                ]),
-                const SizedBox(height: 24),
-                AppButton(label: 'Sign in', onPressed: _login, isLoading: _loading),
-                const SizedBox(height: 32),
-                Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  const Text("New responder? ", style: TextStyle(color: AppColors.textMuted)),
-                  GestureDetector(
-                    onTap: () => context.push('/register'),
-                    child: const Text('Register', style: TextStyle(color: AppColors.responderBlue, fontWeight: FontWeight.w700)),
+                  AppInput(
+                    label: 'Password',
+                    controller: _passCtrl,
+                    obscureText: _obscure,
+                    suffix: IconButton(
+                      icon: Icon(
+                        _obscure ? Icons.visibility_off : Icons.visibility,
+                      ),
+                      onPressed: () => setState(() => _obscure = !_obscure),
+                    ),
+                    validator: (v) =>
+                        v == null || v.isEmpty ? 'Enter password' : null,
                   ),
-                ]),
-              ],
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Checkbox(
+                        value: _rememberMe,
+                        onChanged: (v) =>
+                            setState(() => _rememberMe = v ?? false),
+                        activeColor: AppColors.responderBlue,
+                      ),
+                      const Text('Remember me', style: TextStyle(fontSize: 14)),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  AppButton(
+                    label: 'Sign in',
+                    onPressed: _login,
+                    isLoading: _loading,
+                  ),
+                  const SizedBox(height: 32),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text(
+                        "New responder? ",
+                        style: TextStyle(color: AppColors.textMuted),
+                      ),
+                      TextButton(
+                        onPressed: () => context.push('/register'),
+                        child: const Text('Register'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),

@@ -7,6 +7,8 @@ environment:
   sdk: ^3.11.5
 
 dependencies:
+  safealert_ui:
+    path: ../packages/safealert_ui
   flutter:
     sdk: flutter
   go_router: ^14.6.2

@@ -1,0 +1,16 @@
+name: safealert_ui
+description: Shared TanzAlert visual system and motion primitives.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  google_fonts: ^6.2.1
+
+flutter:
+  uses-material-design: true
+

@@ -123,44 +123,23 @@ class EmergencyNotifier extends StateNotifier<EmergencyState> {
     }
   }
 
-  Future<EmergencyModel?> createFromIot({
-    required String deviceId,
-    required String eventId,
-    required String buttonType,
-    required Position location,
-    int? deviceBattery,
-    String? barangay,
-  }) async {
+  Future<bool> createFromIot({required Map<String, dynamic> payload}) async {
     state = EmergencyCreating();
     try {
-      final em = await _repo.createFromIot(
-        deviceId: deviceId,
-        eventId: eventId,
-        buttonType: buttonType,
-        location: location,
-        deviceBattery: deviceBattery,
-        barangay: barangay,
-      );
+      final em = await _repo.createFromIot(payload: payload);
       setActive(em);
-      return em;
+      return true;
     } on ApiException catch (e) {
       if (e.statusCode == null) {
-        _syncService.queueIot(
-          deviceId: deviceId,
-          eventId: eventId,
-          buttonType: buttonType,
-          location: location,
-          deviceBattery: deviceBattery,
-          barangay: barangay,
-        );
+        await _syncService.queueIot(payload);
         state = EmergencyQueued();
-        return null;
+        return true;
       }
       state = EmergencyError('Failed to send IoT emergency: ${e.message}');
-      return null;
+      return false;
     } catch (_) {
       state = EmergencyError('Failed to send IoT emergency.');
-      return null;
+      return false;
     }
   }
 

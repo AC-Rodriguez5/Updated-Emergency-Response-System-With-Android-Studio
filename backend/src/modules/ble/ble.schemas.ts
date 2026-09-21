@@ -6,6 +6,7 @@ export const pairDeviceSchema = z
     bleServiceUuid: z.string().trim().max(80).optional(),
     firmwareVersion: z.string().trim().max(40).optional(),
     batteryPercent: z.number().min(0).max(100).optional(),
+    fingerprintEnrolled: z.boolean().optional(),
   })
   .strict();
 export type PairDeviceInput = z.infer<typeof pairDeviceSchema>;
@@ -19,6 +20,16 @@ export const unpairBodySchema = z
   .object({ reason: z.string().trim().max(250).optional() })
   .strict();
 export type UnpairBody = z.infer<typeof unpairBodySchema>;
+
+export const deviceStatusSchema = z
+  .object({
+    fingerprintEnrolled: z.boolean().optional(),
+    directCellularEnabled: z.boolean().optional(),
+    firmwareVersion: z.string().trim().max(40).optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, 'Provide at least one status field');
+export type DeviceStatusInput = z.infer<typeof deviceStatusSchema>;
 
 export const bleEventSchema = z
   .object({
@@ -47,10 +58,15 @@ export const fromIotSchema = z
   .object({
     deviceId: z.string().trim().min(1).max(100),
     eventId: z.string().trim().min(1).max(100),
-    buttonType: z.enum(['medical', 'crime', 'fire', 'general_sos']),
+    buttonType: z.literal('general_sos'),
     deviceBatteryAtTrigger: z.number().min(0).max(100).optional(),
     firmwareVersion: z.string().trim().max(40).optional(),
     deviceTimestamp: z.string().datetime().optional(),
+    fingerprintVerified: z.literal(true),
+    authMethod: z.literal('fingerprint'),
+    transport: z.enum(['ble', 'lte']),
+    gnssHdop: z.number().min(0).max(99).optional(),
+    gnssSatellites: z.number().int().min(0).max(100).optional(),
     location: geoPointSchema,
     barangay: z.string().trim().max(120).optional(),
     notes: z.string().trim().max(500).optional(),

@@ -11,8 +11,8 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_24
-        targetCompatibility = JavaVersion.VERSION_24
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
         isCoreLibraryDesugaringEnabled = true
     }
 
@@ -42,10 +42,10 @@ dependencies {
     implementation("androidx.concurrent:concurrent-futures:1.2.0")
 }
 
-// Kotlin JVM target must match compileOptions above (Java 24).
+// Kotlin JVM target must match compileOptions above.
 // Uses the KGP compilerOptions DSL; android.kotlinOptions is deprecated in Kotlin 2.x.
 kotlin {
     compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_24)
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }

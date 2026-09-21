@@ -35,6 +35,12 @@ const ACTION_RULES: Array<{
     describe: (l) => `${actor(l)} triggered an emergency from the IoT keychain.`,
   },
   {
+    match: /^emergency\.iot_device_created$/,
+    module: 'Emergency',
+    severity: 'critical',
+    describe: (l) => `${actor(l)} triggered a fingerprint-authorized wearable emergency.`,
+  },
+  {
     match: /^emergency\.assigned$/,
     module: 'Emergency',
     severity: 'info',

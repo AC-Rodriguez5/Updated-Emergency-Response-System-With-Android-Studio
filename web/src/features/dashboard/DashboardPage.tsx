@@ -18,6 +18,8 @@ import { api } from '@/services/apiClient';
 import { getSocket } from '@/services/socketClient';
 import { fmt } from '@/lib/utils';
 import type { Emergency, Paginated } from '@/types';
+import { motion } from 'motion/react';
+import { listVariants } from '@/styles/motion';
 
 interface OverviewSnapshot {
   activeEmergencies: number;
@@ -86,7 +88,12 @@ export default function DashboardPage() {
   return (
     <AdminShell title="Overview">
       <div className="space-y-8">
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+        <motion.div
+          variants={listVariants}
+          initial="hidden"
+          animate="visible"
+          className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
+        >
           <StatCard
             label="Active Emergencies"
             value={overview?.activeEmergencies ?? '—'}
@@ -132,9 +139,9 @@ export default function DashboardPage() {
             icon={<Clock className="w-6 h-6" />}
             urgent={emergencies.some((e) => e.priority === 'critical')}
           />
-        </div>
+        </motion.div>
 
-        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <div className="ta-panel overflow-hidden rounded-2xl">
           <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
             <h2 className="font-bold text-slate-900">Active Emergencies</h2>
             <span className="text-sm text-slate-500">{emergencies.length} total</span>
@@ -192,7 +199,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        <div className="bg-white rounded-2xl border border-slate-200 p-6">
+        <div className="ta-panel rounded-2xl p-5 sm:p-6">
           <h2 className="font-bold text-slate-900 mb-4">System Status</h2>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <SystemStatusTile
@@ -225,9 +232,12 @@ export default function DashboardPage() {
 function SystemStatusTile({ label, value, ok }: { label: string; value: string; ok: boolean | undefined }) {
   const indicator = ok === undefined ? 'bg-slate-300' : ok ? 'bg-green-500' : 'bg-red-500';
   return (
-    <div className="bg-slate-50 rounded-xl p-4">
+    <div className="rounded-xl border border-slate-200/70 bg-slate-50 p-4">
       <div className="flex items-center gap-2 mb-1">
-        <div className={`w-2 h-2 rounded-full ${indicator}`} />
+        <span className="relative flex size-2">
+          {ok && <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-40" />}
+          <span className={`relative inline-flex size-2 rounded-full ${indicator}`} />
+        </span>
         <span className="text-xs font-semibold text-slate-700">{label}</span>
       </div>
       <p className="text-sm font-bold text-slate-900">{value}</p>

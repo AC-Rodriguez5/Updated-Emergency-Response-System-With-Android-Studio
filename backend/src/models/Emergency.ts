@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export type EmergencyType = 'medical' | 'crime' | 'fire' | 'general_sos';
-export type EmergencySource = 'mobile_app' | 'iot_keychain';
+export type EmergencySource = 'mobile_app' | 'iot_keychain' | 'iot_device';
 export type EmergencyPriority = 'low' | 'medium' | 'high' | 'critical';
 export type EmergencyStatus =
   | 'pending'
@@ -55,9 +55,14 @@ export interface IEmergency extends Document {
   municipality?: string;
   outsideScopeFlag: boolean;
   bleEventId?: string;
+  hardwareEventId?: string;
   sourceDeviceId?: string;
   buttonType?: EmergencyType;
   deviceBatteryAtTrigger?: number;
+  hardwareAuthMethod?: 'fingerprint';
+  gnssHdop?: number;
+  gnssSatellites?: number;
+  deliveryTransports?: Array<'ble' | 'lte'>;
   idempotencyKey?: string;
   notes?: string;
   userSnapshot?: IEmergencyUserSnapshot;
@@ -113,7 +118,11 @@ const emergencySchema = new Schema<IEmergency>(
       enum: ['medical', 'crime', 'fire', 'general_sos'],
       required: true,
     },
-    source: { type: String, enum: ['mobile_app', 'iot_keychain'], required: true },
+    source: {
+      type: String,
+      enum: ['mobile_app', 'iot_keychain', 'iot_device'],
+      required: true,
+    },
     priority: {
       type: String,
       enum: ['low', 'medium', 'high', 'critical'],
@@ -147,9 +156,14 @@ const emergencySchema = new Schema<IEmergency>(
     municipality: { type: String, trim: true, maxlength: 120 },
     outsideScopeFlag: { type: Boolean, default: false, required: true },
     bleEventId: { type: String, trim: true, maxlength: 100 },
+    hardwareEventId: { type: String, trim: true, maxlength: 100 },
     sourceDeviceId: { type: String, trim: true, maxlength: 100 },
     buttonType: { type: String, enum: ['medical', 'crime', 'fire', 'general_sos'] },
     deviceBatteryAtTrigger: { type: Number, min: 0, max: 100 },
+    hardwareAuthMethod: { type: String, enum: ['fingerprint'] },
+    gnssHdop: { type: Number, min: 0, max: 99 },
+    gnssSatellites: { type: Number, min: 0, max: 100 },
+    deliveryTransports: [{ type: String, enum: ['ble', 'lte'] }],
     idempotencyKey: { type: String, trim: true, maxlength: 200 },
     notes: { type: String, trim: true, maxlength: 500 },
     userSnapshot: { type: userSnapshotSchema },
@@ -166,6 +180,13 @@ emergencySchema.index({ userId: 1, createdAt: -1 });
 emergencySchema.index({ assignedResponderId: 1, status: 1 });
 emergencySchema.index({ source: 1, createdAt: -1 });
 emergencySchema.index({ idempotencyKey: 1 }, { unique: true, sparse: true });
+emergencySchema.index(
+  { userId: 1, sourceDeviceId: 1, hardwareEventId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { hardwareEventId: { $type: 'string' } },
+  },
+);
 emergencySchema.index({ currentLocation: '2dsphere' });
 emergencySchema.index({ outsideScopeFlag: 1, status: 1 });
 

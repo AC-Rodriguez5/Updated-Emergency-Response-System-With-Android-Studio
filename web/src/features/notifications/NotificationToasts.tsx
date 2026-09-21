@@ -3,6 +3,7 @@ import { AlertTriangle, Ambulance, BellRing, MapPin, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNotifications } from './NotificationProvider';
 import type { AdminNotification } from './types';
+import { AnimatePresence, motion } from 'motion/react';
 
 export function NotificationToasts() {
   const {
@@ -18,8 +19,9 @@ export function NotificationToasts() {
 
   return (
     <div className="fixed top-4 right-4 z-[200] flex flex-col gap-3 w-[360px] max-w-[calc(100vw-32px)]">
+      <AnimatePresence initial={false}>
       {emergencyAudioBlocked && (
-        <div className="rounded-xl border border-red-300 bg-red-50 p-4 shadow-lg">
+        <motion.div layout initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="rounded-xl border border-red-300 bg-red-50 p-4 shadow-lg">
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-600" />
             <div className="min-w-0 flex-1">
@@ -33,7 +35,7 @@ export function NotificationToasts() {
               </button>
             </div>
           </div>
-        </div>
+        </motion.div>
       )}
       {toasts.map((n) => (
         <ToastCard
@@ -51,6 +53,7 @@ export function NotificationToasts() {
           }}
         />
       ))}
+      </AnimatePresence>
     </div>
   );
 }
@@ -83,11 +86,15 @@ function ToastCard({
   const actionLabel = notif.type === 'ambulance' ? 'Open Request' : 'View on Map';
 
   return (
-    <div
+    <motion.div
+      layout
+      initial={{ opacity: 0, x: 24, scale: 0.98 }}
+      animate={{ opacity: 1, x: 0, scale: 1 }}
+      exit={{ opacity: 0, x: 24, scale: 0.98 }}
       className={cn(
         'rounded-xl shadow-lg border p-4 transition-all',
         accent,
-        notif.priority === 'critical' && 'animate-pulse',
+        notif.priority === 'critical' && 'shadow-[0_10px_35px_rgba(229,72,77,.18)]',
       )}
     >
       <div className="flex items-start gap-3">
@@ -124,6 +131,6 @@ function ToastCard({
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }

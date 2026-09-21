@@ -24,7 +24,12 @@ import {
   ambulanceAdminRoutes,
   ambulanceResponderRoutes,
 } from './modules/ambulance/index.js';
-import { bleDeviceRouter, bleEventRouter, iotEmergencyRouter } from './modules/ble/index.js';
+import {
+  bleDeviceRouter,
+  bleEventRouter,
+  iotEmergencyRouter,
+  deviceEmergencyRouter,
+} from './modules/ble/index.js';
 import {
   locationsRouter,
   emergencyHistoryRouter,
@@ -87,6 +92,7 @@ export function createApp(): Express {
   app.use('/api/user/ble-devices', bleDeviceRouter);
   app.use('/api/user/ble-events', bleEventRouter);
   app.use('/api/emergencies/from-iot', iotEmergencyRouter);
+  app.use('/api/device/emergencies', deviceEmergencyRouter);
   app.use('/api/locations', locationsRouter);
   app.use('/api/emergencies', emergencyHistoryRouter);
   app.use('/api/ambulance-requests', ambulanceHistoryRouter);

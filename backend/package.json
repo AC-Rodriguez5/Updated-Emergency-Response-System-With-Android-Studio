@@ -12,6 +12,7 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "hardware:migration:check": "tsx src/scripts/checkHardwareMigration.ts",
     "lint": "echo 'lint ok (no ESLint config — strict TypeScript is the lint gate)'"
   },
   "dependencies": {

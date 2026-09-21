@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const emergencyTypeSchema = z.enum(['medical', 'crime', 'fire', 'general_sos']);
-export const emergencySourceSchema = z.enum(['mobile_app', 'iot_keychain']);
+export const emergencySourceSchema = z.literal('mobile_app');
 
 export const geoPointSchema = z
   .object({

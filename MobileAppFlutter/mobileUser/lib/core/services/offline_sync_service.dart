@@ -19,9 +19,9 @@ class OfflineSyncService {
   OfflineSyncService(this._repo, this._pendingAlerts);
 
   void start() {
-    _connectivitySub = Connectivity()
-        .onConnectivityChanged
-        .listen((List<ConnectivityResult> results) {
+    _connectivitySub = Connectivity().onConnectivityChanged.listen((
+      List<ConnectivityResult> results,
+    ) {
       if (results.any((r) => r != ConnectivityResult.none) && hasPending) {
         _drainQueue();
       }
@@ -49,26 +49,14 @@ class OfflineSyncService {
     );
   }
 
-  void queueIot({
-    required String deviceId,
-    required String eventId,
-    required String buttonType,
-    required Position location,
-    int? deviceBattery,
-    String? barangay,
-  }) {
-    _pendingAlerts.put(
-      'iot_${DateTime.now().millisecondsSinceEpoch}',
+  Future<void> queueIot(Map<String, dynamic> payload) {
+    final deviceId = payload['deviceId'] as String;
+    final eventId = payload['eventId'] as String;
+    return _pendingAlerts.put(
+      'iot:$deviceId:$eventId',
       jsonEncode({
         'type': 'iot',
-        'payload': {
-          'deviceId': deviceId,
-          'eventId': eventId,
-          'buttonType': buttonType,
-          'location': _positionToMap(location),
-          'deviceBattery': deviceBattery,
-          'barangay': barangay,
-        },
+        'payload': payload,
         'queuedAt': DateTime.now().toUtc().toIso8601String(),
       }),
     );
@@ -92,14 +80,7 @@ class OfflineSyncService {
           );
         } else {
           final p = data['payload'] as Map<String, dynamic>;
-          em = await _repo.createFromIot(
-            deviceId: p['deviceId'] as String,
-            eventId: p['eventId'] as String,
-            buttonType: p['buttonType'] as String,
-            location: _positionFromMap(p['location'] as Map<String, dynamic>),
-            deviceBattery: p['deviceBattery'] as int?,
-            barangay: p['barangay'] as String?,
-          );
+          em = await _repo.createFromIot(payload: p);
         }
         await _pendingAlerts.delete(key);
         _syncedController.add(em);
@@ -110,24 +91,24 @@ class OfflineSyncService {
   }
 
   Map<String, dynamic> _positionToMap(Position p) => {
-        'latitude': p.latitude,
-        'longitude': p.longitude,
-        'accuracy': p.accuracy,
-        'timestamp': p.timestamp.toUtc().toIso8601String(),
-      };
+    'latitude': p.latitude,
+    'longitude': p.longitude,
+    'accuracy': p.accuracy,
+    'timestamp': p.timestamp.toUtc().toIso8601String(),
+  };
 
   Position _positionFromMap(Map<String, dynamic> m) => Position(
-        latitude: (m['latitude'] as num).toDouble(),
-        longitude: (m['longitude'] as num).toDouble(),
-        accuracy: (m['accuracy'] as num).toDouble(),
-        timestamp: DateTime.parse(m['timestamp'] as String),
-        altitude: 0,
-        altitudeAccuracy: 0,
-        heading: 0,
-        headingAccuracy: 0,
-        speed: 0,
-        speedAccuracy: 0,
-      );
+    latitude: (m['latitude'] as num).toDouble(),
+    longitude: (m['longitude'] as num).toDouble(),
+    accuracy: (m['accuracy'] as num).toDouble(),
+    timestamp: DateTime.parse(m['timestamp'] as String),
+    altitude: 0,
+    altitudeAccuracy: 0,
+    heading: 0,
+    headingAccuracy: 0,
+    speed: 0,
+    speedAccuracy: 0,
+  );
 
   void dispose() {
     _connectivitySub?.cancel();

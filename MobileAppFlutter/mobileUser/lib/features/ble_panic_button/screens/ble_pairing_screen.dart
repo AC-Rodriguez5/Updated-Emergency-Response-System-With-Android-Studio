@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../service/ble_service.dart';
@@ -11,70 +12,121 @@ class BlePairingScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ble = ref.watch(bleServiceProvider);
-    final bleNotifier = ref.read(bleServiceProvider.notifier);
+    final controller = ref.read(bleServiceProvider.notifier);
+    final enrolling =
+        ble.enrollmentStatus == 'starting' ||
+        ble.enrollmentStatus == 'place_first' ||
+        ble.enrollmentStatus == 'remove_finger' ||
+        ble.enrollmentStatus == 'place_second';
 
     return Scaffold(
-      appBar: AppBar(title: const Text('BLE Keychain')),
+      appBar: AppBar(title: const Text('TanzAlert device')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _DeviceCard(ble: ble),
+            if (ble.message != null) ...[
+              const SizedBox(height: 12),
+              _Notice(message: ble.message!),
+            ],
             const SizedBox(height: 24),
             if (!ble.isConnected) ...[
-              const Text('How to pair', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              const Text(
+                'Pair your wearable',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              ),
               const SizedBox(height: 8),
               const Text(
-                '1. Turn on your TanzAlert keychain (press the switch).\n'
-                '2. Hold it near your phone.\n'
-                '3. Tap "Scan for Keychain" below.',
-                style: TextStyle(fontSize: 14, color: AppColors.textMuted, height: 1.6),
+                '1. Power the ESP32 and modem from their correct supplies.\n'
+                '2. Hold the emergency button for 8 seconds. If a finger is already enrolled, scan it first.\n'
+                '3. Keep the device near this phone and scan within 2 minutes.',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: AppColors.textMuted,
+                  height: 1.6,
+                ),
               ),
               const SizedBox(height: 24),
               AppButton(
-                label: ble.connection == BleConnectionState.scanning ? 'Scanning...' : 'Scan for Keychain',
+                label: ble.connection == BleConnectionState.scanning
+                    ? 'Scanning…'
+                    : 'Scan for device',
                 onPressed: ble.connection == BleConnectionState.scanning
                     ? null
                     : () async {
                         final messenger = ScaffoldMessenger.of(context);
-                        final btState = await FlutterBluePlus.adapterState.first;
-                        if (btState != BluetoothAdapterState.on) {
+                        final adapterState =
+                            await FlutterBluePlus.adapterState.first;
+                        if (adapterState != BluetoothAdapterState.on) {
                           messenger.showSnackBar(
-                            const SnackBar(content: Text('Please enable Bluetooth first.')),
+                            const SnackBar(
+                              content: Text('Please enable Bluetooth first.'),
+                            ),
                           );
                           return;
                         }
-                        bleNotifier.startScan();
+                        await controller.startScan();
                       },
                 backgroundColor: AppColors.responderBlue,
               ),
             ] else ...[
-              const Text('Keychain Buttons', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 8),
               const Text(
-                'Each button triggers an emergency type. A single press is all that is needed.',
-                style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+                'Device setup',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
               ),
-              const SizedBox(height: 16),
-              GridView.count(
-                crossAxisCount: 2,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisSpacing: 10,
-                mainAxisSpacing: 10,
-                childAspectRatio: 1.4,
-                children: const [
-                  _KeychainButton(label: 'Medical', icon: Icons.medical_services, color: AppColors.alertRed),
-                  _KeychainButton(label: 'Crime', icon: Icons.local_police, color: Color(0xFF7C3AED)),
-                  _KeychainButton(label: 'Fire', icon: Icons.local_fire_department, color: Color(0xFFEA580C)),
-                  _KeychainButton(label: 'SOS', icon: Icons.sos, color: AppColors.adminNavy),
-                ],
+              const SizedBox(height: 12),
+              _ReadinessRow(
+                icon: Icons.fingerprint,
+                label: 'Fingerprint scanner',
+                value: !ble.fingerprintReady
+                    ? 'Not detected'
+                    : ble.fingerprintEnrolled
+                    ? 'Enrolled'
+                    : 'Ready to enroll',
+                ready: ble.fingerprintReady && ble.fingerprintEnrolled,
               ),
+              _ReadinessRow(
+                icon: Icons.gps_fixed,
+                label: 'Emergency location',
+                value: 'SIM7670/A7670 GNSS',
+                ready: true,
+              ),
+              _ReadinessRow(
+                icon: Icons.cell_tower,
+                label: 'Direct LTE backup',
+                value: ble.directCellularEnabled
+                    ? 'Enabled'
+                    : 'Disabled until HTTPS/TLS is validated',
+                ready: ble.directCellularEnabled,
+              ),
+              const SizedBox(height: 20),
+              if (!ble.fingerprintEnrolled)
+                AppButton(
+                  label: enrolling
+                      ? 'Follow the sensor prompts…'
+                      : 'Enroll fingerprint',
+                  onPressed: !ble.fingerprintReady || enrolling
+                      ? null
+                      : () async {
+                          final messenger = ScaffoldMessenger.of(context);
+                          try {
+                            await controller.enrollFingerprint();
+                          } catch (error) {
+                            messenger.showSnackBar(
+                              SnackBar(content: Text(error.toString())),
+                            );
+                          }
+                        },
+                  backgroundColor: AppColors.responderBlue,
+                ),
+              if (!ble.fingerprintEnrolled) const SizedBox(height: 16),
+              const _EmergencyInstructions(),
               const SizedBox(height: 24),
               AppOutlinedButton(
-                label: 'Disconnect Keychain',
-                onPressed: () => bleNotifier.disconnect(),
+                label: 'Disconnect device',
+                onPressed: () => controller.disconnect(),
               ),
             ],
           ],
@@ -90,93 +142,150 @@ class _DeviceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isConnected = ble.isConnected;
+    final connected = ble.isConnected;
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: isConnected ? const Color(0xFFDCFCE7) : AppColors.surface,
+        color: connected ? const Color(0xFFDCFCE7) : AppColors.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: isConnected ? AppColors.successGreen : AppColors.border, width: isConnected ? 2 : 1),
+        border: Border.all(
+          color: connected ? AppColors.successGreen : AppColors.border,
+          width: connected ? 2 : 1,
+        ),
       ),
       child: Column(
         children: [
           Icon(
-            isConnected ? Icons.bluetooth_connected : Icons.bluetooth_disabled,
-            color: isConnected ? AppColors.successGreen : AppColors.textMuted,
+            connected ? Icons.watch : Icons.bluetooth_disabled,
+            color: connected ? AppColors.successGreen : AppColors.textMuted,
             size: 48,
           ),
           const SizedBox(height: 12),
           Text(
-            isConnected ? (ble.deviceName ?? 'TanzAlert Keychain') : 'No keychain paired',
+            connected
+                ? (ble.deviceName ?? 'TanzAlert wearable')
+                : 'No device connected',
+            textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w700,
-              color: isConnected ? AppColors.successGreen : AppColors.textMuted,
+              color: connected ? AppColors.successGreen : AppColors.textMuted,
             ),
           ),
-          if (isConnected) ...[
+          if (connected && ble.deviceId != null) ...[
             const SizedBox(height: 4),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (ble.batteryPercent != null) ...[
-                  Icon(Icons.battery_full, size: 14, color: AppColors.textMuted),
-                  const SizedBox(width: 2),
-                  Text('${ble.batteryPercent}%', style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
-                  const SizedBox(width: 12),
-                ],
-                if (ble.lastSeen != null)
-                  Text(
-                    'Last seen: ${_formatTime(ble.lastSeen!)}',
-                    style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
-                  ),
-              ],
+            Text(
+              ble.deviceId!,
+              style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
             ),
-            if (ble.isHeartbeatStale) ...[
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: const Color(0xFFFEF3C7), borderRadius: BorderRadius.circular(20)),
-                child: const Text('Heartbeat lost', style: TextStyle(fontSize: 11, color: AppColors.warningAmber, fontWeight: FontWeight.w700)),
+          ],
+          if (ble.isHeartbeatStale) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'Heartbeat lost — check power and Bluetooth',
+              style: TextStyle(
+                fontSize: 12,
+                color: AppColors.warningAmber,
+                fontWeight: FontWeight.w700,
               ),
-            ],
+            ),
           ],
         ],
       ),
     );
   }
-
-  String _formatTime(DateTime t) {
-    final diff = DateTime.now().difference(t);
-    if (diff.inSeconds < 5) return 'just now';
-    if (diff.inSeconds < 60) return '${diff.inSeconds}s ago';
-    return '${diff.inMinutes}m ago';
-  }
 }
 
-class _KeychainButton extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final Color color;
-  const _KeychainButton({required this.label, required this.icon, required this.color});
+class _Notice extends StatelessWidget {
+  final String message;
+  const _Notice({required this.message});
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.2)),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: color, size: 24),
-          const SizedBox(height: 6),
-          Text(label, style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w700)),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: const Color(0xFFFFF7ED),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: const Color(0xFFFED7AA)),
+    ),
+    child: Text(message, style: const TextStyle(fontSize: 13, height: 1.4)),
+  );
+}
+
+class _ReadinessRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final bool ready;
+  const _ReadinessRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.ready,
+  });
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: Row(
+      children: [
+        Icon(icon, color: ready ? AppColors.successGreen : AppColors.textMuted),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.textMuted,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Icon(
+          ready ? Icons.check_circle : Icons.info_outline,
+          color: ready ? AppColors.successGreen : AppColors.warningAmber,
+          size: 20,
+        ),
+      ],
+    ),
+  );
+}
+
+class _EmergencyInstructions extends StatelessWidget {
+  const _EmergencyInstructions();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: AppColors.background,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: AppColors.border),
+    ),
+    child: const Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Send an emergency',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        SizedBox(height: 8),
+        Text(
+          'Scan the enrolled finger. The LED blinks three times when verified. Then hold the emergency button for 2 seconds. The device waits for a real GNSS fix before it sends a General SOS.',
+          style: TextStyle(
+            fontSize: 13,
+            color: AppColors.textMuted,
+            height: 1.5,
+          ),
+        ),
+      ],
+    ),
+  );
 }

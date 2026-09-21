@@ -1,1 +1,6 @@
-export { bleDeviceRouter, bleEventRouter, iotEmergencyRouter } from './ble.routes.js';
+export {
+  bleDeviceRouter,
+  bleEventRouter,
+  iotEmergencyRouter,
+  deviceEmergencyRouter,
+} from './ble.routes.js';

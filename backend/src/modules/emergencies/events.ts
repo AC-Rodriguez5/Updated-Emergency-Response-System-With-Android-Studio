@@ -6,6 +6,7 @@ import { recordEmergencyNotification } from '../notifications/notifications.serv
 export type EmergencyEventName =
   | 'emergency.created'
   | 'emergency.iot_keychain_created'
+  | 'emergency.iot_device_created'
   | 'emergency.updated'
   | 'emergency.assigned'
   | 'emergency.responder_on_the_way'

@@ -12,6 +12,7 @@ import 'core/storage/secure_storage.dart';
 import 'core/theme/app_theme.dart';
 import 'core/routing/app_router.dart';
 import 'features/auth/providers/auth_provider.dart';
+import 'features/ble_panic_button/service/ble_service.dart';
 import 'features/emergency/providers/emergency_provider.dart';
 
 void main() async {
@@ -74,6 +75,9 @@ class _TanzAlertAppState extends ConsumerState<TanzAlertApp>
       unawaited(_startEmergencySession());
     } else if (state is AuthUnauthenticated || state is AuthPending) {
       _disconnectEmergencySocket();
+      final ble = ref.read(bleServiceProvider.notifier);
+      ble.onEmergency = null;
+      unawaited(ble.disconnect());
       ref.read(emergencyProvider.notifier).reset();
     }
   }
@@ -82,6 +86,10 @@ class _TanzAlertAppState extends ConsumerState<TanzAlertApp>
     if (_startingEmergencySession) return;
     _startingEmergencySession = true;
     try {
+      final ble = ref.read(bleServiceProvider.notifier);
+      ble.onEmergency = (payload) =>
+          ref.read(emergencyProvider.notifier).createFromIot(payload: payload);
+      await ble.retryQueuedEvents();
       await ref.read(emergencyProvider.notifier).loadActiveEmergency();
       await _connectEmergencySocket();
     } finally {
@@ -122,6 +130,7 @@ class _TanzAlertAppState extends ConsumerState<TanzAlertApp>
     const events = [
       'emergency.created',
       'emergency.iot_keychain_created',
+      'emergency.iot_device_created',
       'emergency.updated',
       'emergency.assigned',
       'emergency.responder_on_the_way',
