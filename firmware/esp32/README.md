@@ -60,22 +60,59 @@ only needed to pair and to enroll a finger. BLE relay stays available as a fallb
 and both paths carry the same event ID so a press delivered over both still produces
 exactly one incident.
 
-Two things have to be true, and both come from the app's build:
+One thing has to be true, and it comes from the app's build:
 
 | Dart define | Effect |
 |---|---|
 | `API_BASE_URL` | Must be `https://…`. The firmware refuses plaintext outright. |
-| `CELLULAR_APN` | Your carrier's APN. Empty means direct delivery stays off. |
+| `CELLULAR_APN` | Optional override. Normally leave empty — the APN is found from the SIM. |
 | `MODEM_CA_FILE` | Optional, but see below. Filename of a root CA **already on the modem**. |
 
 ```powershell
 # From the repo root, with .\start-tunnel.ps1 already running:
-.\run-mobile-user.ps1 -Apn internet -CaFile ca.pem
+.\run-mobile-user.ps1 -CaFile ca.pem
 ```
 
-Then **re-pair the wearable** — the APN, API URL and CA filename all reach it in the
-pairing write, so a device paired before this change keeps its old settings until it
-is paired again.
+Then **re-pair the wearable** — the API URL, CA filename and any APN override all
+reach it in the pairing write, so a device paired before this change keeps its old
+settings until it is paired again.
+
+### Any SIM, no configuration
+
+A wearable gets handed whatever SIM is cheapest that month, so the APN is not a
+build-time constant. The firmware reads the SIM's home network from its IMSI
+(`AT+CIMI`, MCC 515) and picks the matching APN:
+
+| Network | Brands on it | APN |
+|---|---|---|
+| 515-02 | Globe, TM, GOMO | `internet.globe.com.ph` |
+| 515-01 | Islacom (Globe) | `internet.globe.com.ph` |
+| 515-24 | ABS-CBN Mobile (on Globe) | `internet.globe.com.ph` |
+| 515-03 | Smart, TNT | `internet` |
+| 515-18 | Cure (Smart) | `internet` |
+| 515-05 | Sun Cellular | `minternet` |
+| 515-66 | DITO | `internet.dito.ph` |
+
+Several retail brands share one network and therefore one APN — TM and GOMO are
+Globe, TNT is Smart. Codes are from the ITU/Wikipedia MCC-MNC register; APN names
+are from each carrier's own documentation (DITO publishes `internet.dito.ph`).
+
+If the SIM is an MVNO the table does not list, or its documented APN does not work,
+the firmware walks a fallback list until one carries data — blank first, since most
+current LTE SIMs carry their own profile and let the network assign the right APN,
+then `internet`, `internet.globe.com.ph`, `internet.dito.ph`, `smartlte`,
+`minternet`, `http.globe.com.ph`.
+
+The order of attempts is: a provisioned `CELLULAR_APN` override, then whatever
+worked last time (remembered in NVS, so the usual case costs one attempt), then the
+SIM's table APN, then the fallbacks. A winner is remembered across reboots.
+
+An APN is only accepted when `AT+NETOPEN` is followed by a real address from
+`AT+IPADDR`. `NETOPEN` alone answers OK on a wrong APN too, which is
+indistinguishable from a working bearer until the first request times out thirty
+seconds later — so a wrong APN is rejected in about a second instead. And if an APN
+brings up a bearer but requests then stop completing twice in a row — the signature
+of a swapped SIM — the remembered APN is forgotten and the search restarts.
 
 ### Loading the CA, and what happens without one
 
@@ -112,13 +149,19 @@ an open incident posts a fix every 10 seconds and re-dialling each time would ad
 seconds to every position update. A failed request drops the cached bearer so the next
 attempt re-dials.
 
-Three serial keys exist for exactly this, in the order you want them:
+Four serial keys exist for exactly this, in the order you want them:
 
 | Key | Use |
 |---|---|
-| `l` | LTE preflight: `CPIN`, `CSQ`, `CREG`, `CPSI`, `CGACT`, plus what was provisioned. Direct delivery fails at one of these and the HTTP error never says which. |
+| `l` | LTE preflight: `CPIN`, `CSQ`, `CREG`, `CPSI`, `CGACT`, the detected carrier, and the APN state. Direct delivery fails at one of these and the HTTP error never says which. |
+| `a` | Walks every APN candidate and reports which ones actually carry data, then remembers the first that works. The carrier equivalent of the `f` scanner hunt. |
 | `c` | Lists the modem's certificates and compares them against the provisioned filename. "No CA loaded" and "wrong filename provisioned" fail the handshake identically; this is the only way to tell them apart. |
 | `t` | One-shot `GET <apiBase>/health` over cellular. Proves bearer, TLS, DNS and the backend end to end without pressing the button and raising a real incident. |
+
+If `a` reports that *nothing* carries data, the problem is almost never the APN —
+check `l` for a seated SIM, a data plan with load on it, a connected antenna, and a
+registration that reports `,1` or `,5`. An unregistered modem fails every APN
+identically.
 
 `t` is the acceptance test. If it prints `direct LTE delivery works end to end`, a
 button press will reach dispatch with the phone switched off. A 7xx code there is a

@@ -9,6 +9,7 @@ import MapPage from '@/features/map/MapPage';
 import AmbulanceRequestsPage from '@/features/ambulance_requests/AmbulanceRequestsPage';
 import DispatchPage from '@/features/dispatch/DispatchPage';
 import RespondersPage from '@/features/responders/RespondersPage';
+import DevicesPage from '@/features/devices/DevicesPage';
 import ReportsPage from '@/features/reports/ReportsPage';
 import AuditPage from '@/features/audit/AuditPage';
 import SettingsPage from '@/features/settings/SettingsPage';
@@ -45,6 +46,7 @@ export function AppRouter() {
       <Route path="/dispatch" element={<RequireAuth><DispatchPage /></RequireAuth>} />
       <Route path="/ambulance-requests" element={<RequireAuth><AmbulanceRequestsPage /></RequireAuth>} />
       <Route path="/map" element={<RequireAuth><MapPage /></RequireAuth>} />
+      <Route path="/devices" element={<RequireAuth><DevicesPage /></RequireAuth>} />
       <Route path="/approvals" element={<RequireAuth><ApprovalsPage /></RequireAuth>} />
       <Route path="/reports" element={<RequireAuth><ReportsPage /></RequireAuth>} />
       <Route path="/audit" element={<RequireAuth><AuditPage /></RequireAuth>} />

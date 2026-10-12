@@ -2,10 +2,13 @@
 # tunnel (read from tunnel-url.txt). Run .\start-tunnel.ps1 first in another
 # terminal.
 #
-# -Apn provisions the panic-button wearable for DIRECT cellular delivery, so it
-# posts alerts and GPS fixes to the backend itself instead of relaying through
-# this phone over Bluetooth. Without it the wearable still works, but every
-# delivery depends on the phone being in range.
+# Because the tunnel URL is HTTPS, this also provisions the panic-button wearable
+# for DIRECT cellular delivery: it posts alerts and GPS fixes to the backend itself
+# rather than relaying through this phone over Bluetooth. The wearable finds its own
+# APN from the SIM (Globe/TM/GOMO, Smart/TNT, DITO, Sun), so no APN is needed here.
+#
+# -Apn is an override for a SIM the firmware's table does not cover — an MVNO or a
+# private APN. Leave it off for any ordinary Philippine SIM.
 #
 # -CaFile is the filename of a root CA ALREADY loaded into the modem's own
 # filesystem with AT+CCERTDOWN (see firmware/esp32/README.md). Supply it and the
@@ -40,13 +43,18 @@ Write-Host "Mobile User app -> API_BASE_URL=$api" -ForegroundColor Cyan
 
 $defines = @("--dart-define=API_BASE_URL=$api")
 
-if ($Apn) {
-  $defines += "--dart-define=CELLULAR_APN=$Apn"
+if ($api.StartsWith('https://')) {
+  Write-Host "Direct cellular delivery -> ON" -ForegroundColor Green
+  if ($Apn) {
+    $defines += "--dart-define=CELLULAR_APN=$Apn"
+    Write-Host "  APN override: $Apn" -ForegroundColor Cyan
+  } else {
+    Write-Host "  APN: found from the SIM (Globe/TM/GOMO, Smart/TNT, DITO, Sun)" -ForegroundColor Cyan
+  }
   if ($CaFile) {
     $defines += "--dart-define=MODEM_CA_FILE=$CaFile"
-    Write-Host "Direct cellular delivery -> ON (apn=$Apn, server cert verified against $CaFile)" -ForegroundColor Green
+    Write-Host "  Server certificate verified against $CaFile" -ForegroundColor Cyan
   } else {
-    Write-Host "Direct cellular delivery -> ON (apn=$Apn)" -ForegroundColor Green
     Write-Host "  WARNING: no -CaFile, so the wearable will NOT verify the backend's" -ForegroundColor Yellow
     Write-Host "  certificate. Traffic is encrypted but the device token is exposed to a" -ForegroundColor Yellow
     Write-Host "  man-in-the-middle. Load a CA onto the modem and pass -CaFile before" -ForegroundColor Yellow
@@ -54,7 +62,7 @@ if ($Apn) {
   }
   Write-Host "  Re-pair the wearable after this launch for the change to reach it." -ForegroundColor Cyan
 } else {
-  Write-Host "Direct cellular delivery -> OFF (pass -Apn <carrier apn> to enable)" -ForegroundColor DarkGray
+  Write-Host "Direct cellular delivery -> OFF (the API URL is not https://)" -ForegroundColor DarkGray
   Write-Host "  The wearable will relay alerts through this phone over Bluetooth." -ForegroundColor DarkGray
 }
 

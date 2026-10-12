@@ -9,7 +9,19 @@ export interface IBleDevice extends Document {
   firmwareVersion?: string;
   bleServiceUuid?: string;
   batteryPercent?: number;
+  /** Last contact of any kind: pairing, a check-in, an alert, or a streamed fix. */
   lastSeenAt?: Date;
+  /**
+   * Last liveness report relayed by the owner's phone while it held a Bluetooth
+   * link to the device.
+   *
+   * Kept separate from `lastSeenAt` because the two answer different questions. A
+   * device only contacts the backend by itself when it has an alert to send, so
+   * without check-ins a perfectly healthy wearable looks days stale. This field is
+   * the one that means "known to be powered and in range", and it is only ever as
+   * fresh as the last time the owner's phone was nearby with the app running.
+   */
+  lastCheckInAt?: Date;
   lastRssi?: number;
   switchState?: BleSwitchState;
   hardwareProfile: 'fingerprint_gnss_lte';
@@ -35,6 +47,7 @@ const bleDeviceSchema = new Schema<IBleDevice>(
     bleServiceUuid: { type: String, trim: true, maxlength: 80 },
     batteryPercent: { type: Number, min: 0, max: 100 },
     lastSeenAt: { type: Date },
+    lastCheckInAt: { type: Date },
     lastRssi: { type: Number, min: -200, max: 0 },
     switchState: { type: String, enum: ['on', 'off'] },
     hardwareProfile: {
@@ -64,5 +77,7 @@ const bleDeviceSchema = new Schema<IBleDevice>(
 
 bleDeviceSchema.index({ deviceId: 1 }, { unique: true });
 bleDeviceSchema.index({ deviceId: 1, pairingStatus: 1 });
+// The admin fleet view sorts by how recently each device was heard from.
+bleDeviceSchema.index({ pairingStatus: 1, lastSeenAt: -1 });
 
 export const BleDevice = mongoose.model<IBleDevice>('BleDevice', bleDeviceSchema);

@@ -10,6 +10,7 @@ import {
 import { AppError } from '../../shared/middleware/errorHandler.js';
 import {
   bleEventSchema,
+  deviceCheckInSchema,
   deviceLocationSchema,
   deviceStatusSchema,
   fromIotSchema,
@@ -17,6 +18,7 @@ import {
   pairDeviceSchema,
   unpairBodySchema,
   type BleEventInput,
+  type DeviceCheckInInput,
   type DeviceLocationInput,
   type DeviceStatusInput,
   type FromIotInput,
@@ -25,6 +27,7 @@ import {
   type UnpairBody,
 } from './ble.schemas.js';
 import * as svc from './ble.service.js';
+import { checkInDevice } from '../admin/devices.service.js';
 import { deviceAuthGuard } from './deviceAuth.js';
 
 export const bleDeviceRouter = Router();
@@ -77,6 +80,26 @@ bleDeviceRouter.get(
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const data = await svc.listDevices(req.auth!);
+      res.json({ data });
+    } catch (err) { next(err); }
+  },
+);
+
+// The phone calls this every couple of minutes while it holds a Bluetooth link.
+// Without it, "last seen" on the admin dashboard would only ever advance when an
+// alert was sent, so an idle but healthy wearable would read as days stale.
+bleDeviceRouter.post(
+  '/:id/checkin',
+  deviceLocationLimiter,
+  validateRequest({ params: idParamSchema, body: deviceCheckInSchema }),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const data = await checkInDevice(
+        (req.validated!.params as IdParam).id,
+        req.auth!.accountId,
+        req.validated!.body as DeviceCheckInInput,
+      );
+      if (!data) throw new AppError('Device not found', 404, 'NOT_FOUND');
       res.json({ data });
     } catch (err) { next(err); }
   },

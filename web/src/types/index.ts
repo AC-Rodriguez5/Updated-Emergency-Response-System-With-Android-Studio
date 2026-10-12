@@ -186,6 +186,74 @@ export interface Emergency {
   updatedAt: string;
 }
 
+// ─── Panic-button devices ─────────────────────────────────────────────────────
+
+export type DeviceLinkStatus = 'online' | 'idle' | 'offline' | 'unpaired';
+
+/**
+ * Why a device could not raise an alert as it stands.
+ *
+ * `not_enrolled` is the one that matters: a paired device with no fingerprint
+ * template physically cannot send an SOS, because the firmware requires a verified
+ * finger before it accepts the button.
+ */
+export type DeviceReadiness =
+  | 'ready'
+  | 'not_enrolled'
+  | 'unpaired'
+  | 'owner_not_approved';
+
+export interface DeviceOwner {
+  id: string;
+  name?: string;
+  phone?: string;
+  barangay?: string;
+  approvalStatus?: string;
+  isApproved: boolean;
+}
+
+export interface PanicDevice {
+  id: string;
+  deviceId: string;
+  linkStatus: DeviceLinkStatus;
+  readiness: DeviceReadiness;
+  lastSeenAt?: string;
+  lastCheckInAt?: string;
+  secondsSinceSeen?: number;
+  owner?: DeviceOwner;
+  firmwareVersion?: string;
+  batteryPercent?: number;
+  fingerprintEnrolled: boolean;
+  directCellularEnabled: boolean;
+  lastTransport?: 'ble' | 'lte';
+  pairedAt?: string;
+  revokedAt?: string;
+  revokedReason?: string;
+  activeIncident?: {
+    id: string;
+    status: string;
+    locationStatus: string;
+    locationRevision: number;
+    createdAt: string;
+  };
+  totalIncidents: number;
+}
+
+export interface DeviceFleetSummary {
+  total: number;
+  online: number;
+  idle: number;
+  offline: number;
+  unpaired: number;
+  needsAttention: number;
+  tracking: number;
+}
+
+export interface DeviceFleet extends Paginated<PanicDevice> {
+  summary: DeviceFleetSummary;
+  thresholds: { onlineWithinSeconds: number; idleWithinSeconds: number };
+}
+
 // ─── Responder live location ──────────────────────────────────────────────────
 
 export interface ResponderLiveLocation {

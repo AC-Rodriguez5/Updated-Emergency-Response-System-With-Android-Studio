@@ -35,7 +35,9 @@ export async function pairDevice(input, auth) {
         existing.hardwareProfile = 'fingerprint_gnss_lte';
         existing.deviceTokenHash = deviceTokenHash;
         existing.tokenIssuedAt = new Date();
-        existing.directCellularEnabled = false;
+        // Re-pairing re-provisions the device, so take the phone's declared intent
+        // rather than resetting to false and waiting for the follow-up status PATCH.
+        existing.directCellularEnabled = input.directCellularEnabled ?? false;
         existing.pairingStatus = 'paired';
         existing.pairedAt = new Date();
         existing.revokedAt = undefined;
@@ -55,7 +57,7 @@ export async function pairDevice(input, auth) {
         batteryPercent: input.batteryPercent,
         hardwareProfile: 'fingerprint_gnss_lte',
         fingerprintEnrolled: input.fingerprintEnrolled ?? false,
-        directCellularEnabled: false,
+        directCellularEnabled: input.directCellularEnabled ?? false,
         deviceTokenHash,
         tokenIssuedAt: new Date(),
         pairingStatus: 'paired',

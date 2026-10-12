@@ -27,6 +27,17 @@ class BleDeviceState {
   /// True when the wearable has a CA on its modem and therefore authenticates
   /// the backend's certificate. False means encrypted but unverified.
   final bool serverCertVerified;
+
+  /// Carrier the wearable read from its own SIM, e.g. "Smart / TNT". The
+  /// firmware picks the APN from this, so it is the useful thing to show when
+  /// cellular delivery is not working.
+  final String simBrands;
+
+  /// APN currently carrying traffic, or the one remembered from last time.
+  final String activeApn;
+
+  /// True while the wearable has a working data bearer of its own.
+  final bool cellularOnline;
   final String enrollmentStatus;
   final String? message;
 
@@ -44,6 +55,9 @@ class BleDeviceState {
     this.provisioned = false,
     this.directCellularEnabled = false,
     this.serverCertVerified = false,
+    this.simBrands = '',
+    this.activeApn = '',
+    this.cellularOnline = false,
     this.enrollmentStatus = 'not_started',
     this.message,
   });
@@ -68,6 +82,9 @@ class BleDeviceState {
     bool? provisioned,
     bool? directCellularEnabled,
     bool? serverCertVerified,
+    String? simBrands,
+    String? activeApn,
+    bool? cellularOnline,
     String? enrollmentStatus,
     String? message,
     bool clearMessage = false,
@@ -85,6 +102,9 @@ class BleDeviceState {
     provisioned: provisioned ?? this.provisioned,
     directCellularEnabled: directCellularEnabled ?? this.directCellularEnabled,
     serverCertVerified: serverCertVerified ?? this.serverCertVerified,
+    simBrands: simBrands ?? this.simBrands,
+    activeApn: activeApn ?? this.activeApn,
+    cellularOnline: cellularOnline ?? this.cellularOnline,
     enrollmentStatus: enrollmentStatus ?? this.enrollmentStatus,
     message: clearMessage ? null : message ?? this.message,
   );
@@ -277,6 +297,9 @@ class BleService extends StateNotifier<BleDeviceState> {
         provisioned: true,
         directCellularEnabled: provisioned['directCellularEnabled'] == true,
         serverCertVerified: provisioned['serverCertVerified'] == true,
+        simBrands: provisioned['simBrands']?.toString() ?? '',
+        activeApn: provisioned['activeApn']?.toString() ?? '',
+        cellularOnline: provisioned['cellularOnline'] == true,
         enrollmentStatus:
             provisioned['enrollmentStatus']?.toString() ?? 'ready',
         clearMessage: true,
@@ -614,9 +637,66 @@ class BleService extends StateNotifier<BleDeviceState> {
     );
   }
 
+  /// Re-reads the device's identity so the status card stays current.
+  ///
+  /// The wearable cannot report its carrier at pairing time — its modem needs
+  /// roughly 20 seconds to boot before the SIM can be read — so a one-shot read at
+  /// pairing would permanently show "unknown". This also keeps the GPS and
+  /// tracking indicators live.
+  Future<void> _refreshIdentity() async {
+    if (!state.isConnected) return;
+    try {
+      final latest = await _readIdentity();
+      state = state.copyWith(
+        fingerprintReady: latest['fingerprintReady'] == true,
+        fingerprintEnrolled: latest['fingerprintEnrolled'] == true,
+        pairingWindow: latest['pairingWindow'] == true,
+        directCellularEnabled: latest['directCellularEnabled'] == true,
+        serverCertVerified: latest['serverCertVerified'] == true,
+        simBrands: latest['simBrands']?.toString() ?? state.simBrands,
+        activeApn: latest['activeApn']?.toString() ?? state.activeApn,
+        cellularOnline: latest['cellularOnline'] == true,
+      );
+    } catch (_) {
+      // A failed read is not a disconnect; the heartbeat check below owns that.
+    }
+  }
+
+  /// Tells the backend the wearable is powered and in range.
+  ///
+  /// A panic button only contacts the server by itself when it has an alert to
+  /// send, so without this the admin dashboard's "last seen" would only ever
+  /// advance on an emergency and an idle, healthy device would read as days stale.
+  /// Liveness is therefore only ever as fresh as the last time this phone was
+  /// nearby with the app running, which is what the dashboard says.
+  Future<void> _checkIn() async {
+    final serverDeviceId = state.serverDeviceId;
+    if (serverDeviceId == null || !state.isConnected) return;
+    try {
+      await _dio.post(
+        '/user/ble-devices/$serverDeviceId/checkin',
+        data: {
+          if (state.batteryPercent != null) 'batteryPercent': state.batteryPercent,
+          if (state.firmwareVersion != null)
+            'firmwareVersion': state.firmwareVersion,
+        },
+      );
+    } catch (_) {
+      // A missed check-in is not worth surfacing: the dashboard degrades to a
+      // slightly older "last seen" and the next tick retries.
+    }
+  }
+
   void _startHeartbeatTimer() {
     _heartbeatTimer?.cancel();
+    var ticks = 0;
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      ticks++;
+      // Every third tick, so the extra BLE read costs little.
+      if (ticks % 3 == 0) unawaited(_refreshIdentity());
+      // Every 24th tick — two minutes. The backend treats anything inside five
+      // minutes as online, so this tolerates one missed relay.
+      if (ticks % 24 == 1) unawaited(_checkIn());
       if (state.isHeartbeatStale && state.isConnected) {
         state = state.copyWith(
           connection: BleConnectionState.disconnected,

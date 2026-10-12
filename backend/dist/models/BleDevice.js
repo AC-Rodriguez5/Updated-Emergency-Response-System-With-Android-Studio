@@ -6,6 +6,7 @@ const bleDeviceSchema = new Schema({
     bleServiceUuid: { type: String, trim: true, maxlength: 80 },
     batteryPercent: { type: Number, min: 0, max: 100 },
     lastSeenAt: { type: Date },
+    lastCheckInAt: { type: Date },
     lastRssi: { type: Number, min: -200, max: 0 },
     switchState: { type: String, enum: ['on', 'off'] },
     hardwareProfile: {
@@ -32,4 +33,6 @@ const bleDeviceSchema = new Schema({
 }, { timestamps: true });
 bleDeviceSchema.index({ deviceId: 1 }, { unique: true });
 bleDeviceSchema.index({ deviceId: 1, pairingStatus: 1 });
+// The admin fleet view sorts by how recently each device was heard from.
+bleDeviceSchema.index({ pairingStatus: 1, lastSeenAt: -1 });
 export const BleDevice = mongoose.model('BleDevice', bleDeviceSchema);
