@@ -68,6 +68,8 @@ export default function DashboardPage() {
       void refetchOverview();
     };
     socket.on('emergency.created', handler);
+    socket.on('emergency.iot_keychain_created', handler);
+    socket.on('emergency.iot_device_created', handler);
     socket.on('emergency.updated', handler);
     socket.on('emergency.resolved', handler);
     socket.on('emergency.assigned', handler);
@@ -75,6 +77,8 @@ export default function DashboardPage() {
     socket.on('ambulance_request.completed', handler);
     return () => {
       socket.off('emergency.created', handler);
+      socket.off('emergency.iot_keychain_created', handler);
+      socket.off('emergency.iot_device_created', handler);
       socket.off('emergency.updated', handler);
       socket.off('emergency.resolved', handler);
       socket.off('emergency.assigned', handler);

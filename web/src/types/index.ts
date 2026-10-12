@@ -102,8 +102,15 @@ export interface AmbulanceUnitOption {
 // ─── Emergency ───────────────────────────────────────────────────────────────
 
 export type EmergencyType = 'medical' | 'crime' | 'fire' | 'general_sos';
-export type EmergencySource = 'mobile_app' | 'iot_keychain';
+/** `iot_device` is the fingerprint + panic-button wearable. */
+export type EmergencySource = 'mobile_app' | 'iot_keychain' | 'iot_device';
 export type EmergencyPriority = 'low' | 'medium' | 'high' | 'critical';
+/**
+ * `pending` means the incident is live but has no coordinates yet. The panic
+ * button raises its alert on the button press and only then starts searching for
+ * a GNSS fix, so `currentLocation` is genuinely absent until the first fix lands.
+ */
+export type EmergencyLocationStatus = 'pending' | 'fixed';
 export type EmergencyStatus =
   | 'pending' | 'assigned' | 'responder_on_the_way' | 'responder_nearby'
   | 'arrived' | 'resolved' | 'cancelled';
@@ -148,16 +155,27 @@ export interface Emergency {
   status: EmergencyStatus;
   userId: string;
   assignedResponderId?: string;
-  currentLocation: GeoPoint;
+  /** Absent while `locationStatus` is `pending`. */
+  currentLocation?: GeoPoint;
+  locationStatus: EmergencyLocationStatus;
+  locationRevision: number;
+  locationFirstFixAt?: string;
+  lastLocationAt?: string;
+  trackingActive: boolean;
   isInsideTanza: boolean;
   outsideScopeFlag: boolean;
   barangay?: string;
   municipality?: string;
   notes?: string;
   bleEventId?: string;
+  hardwareEventId?: string;
   sourceDeviceId?: string;
   buttonType?: EmergencyType;
   deviceBatteryAtTrigger?: number;
+  hardwareAuthMethod?: 'fingerprint';
+  gnssHdop?: number;
+  gnssSatellites?: number;
+  deliveryTransports?: Array<'ble' | 'lte'>;
   idempotencyKey?: string;
   userSnapshot?: UserSnapshot;
   timeline: TimelineEvent[];
@@ -298,7 +316,11 @@ export interface EmergencyEventPayload {
   isInsideTanza: boolean;
   outsideScopeFlag: boolean;
   barangay?: string;
-  location: GeoPoint;
+  location?: GeoPoint;
+  locationStatus: EmergencyLocationStatus;
+  locationRevision: number;
+  trackingActive: boolean;
+  sourceDeviceId?: string;
   userSnapshot?: UserSnapshot;
   occurredAt: string;
 }

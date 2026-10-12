@@ -8,7 +8,15 @@ export {
 } from './Responder.js';
 export { Alert, type IAlert } from './Alert.js';
 export { Contact, type IContact } from './Contact.js';
-export { Emergency, type IEmergency, type EmergencyType, type EmergencySource, type EmergencyPriority, type EmergencyStatus } from './Emergency.js';
+export {
+  Emergency,
+  type IEmergency,
+  type EmergencyType,
+  type EmergencySource,
+  type EmergencyPriority,
+  type EmergencyStatus,
+  type EmergencyLocationStatus,
+} from './Emergency.js';
 export { LocationSample, type ILocationSample, type ActorType } from './LocationSample.js';
 export { BleDevice, type IBleDevice, type BlePairingStatus, type BleSwitchState } from './BleDevice.js';
 export { AmbulanceUnit, type IAmbulanceUnit, type AmbulanceAvailability, type AmbulanceUnitType } from './AmbulanceUnit.js';

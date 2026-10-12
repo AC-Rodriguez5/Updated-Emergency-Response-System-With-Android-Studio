@@ -3,6 +3,7 @@ import { AdminNotification, } from '../../models/index.js';
 const NOTIFY_EMERGENCY_EVENTS = new Set([
     'emergency.created',
     'emergency.iot_keychain_created',
+    'emergency.iot_device_created',
     'emergency.assigned',
     'emergency.resolved',
     'emergency.cancelled',
@@ -23,7 +24,7 @@ const HUMAN_EMERGENCY_TYPE = {
     general_sos: 'General SOS',
 };
 function priorityForEmergency(emergency, event) {
-    if (event === 'emergency.created' || event === 'emergency.iot_keychain_created') {
+    if (event === 'emergency.created' || event === 'emergency.iot_keychain_created' || event === 'emergency.iot_device_created') {
         return emergency.priority === 'critical' ? 'critical' : 'high';
     }
     return 'normal';
@@ -45,7 +46,9 @@ export async function recordEmergencyNotification(emergency, event, io) {
     try {
         const sender = emergency.userSnapshot?.fullName ?? 'A user';
         const typeLabel = HUMAN_EMERGENCY_TYPE[emergency.type] ?? emergency.type;
-        const isCreated = event === 'emergency.created' || event === 'emergency.iot_keychain_created';
+        const isCreated = event === 'emergency.created' ||
+            event === 'emergency.iot_keychain_created' ||
+            event === 'emergency.iot_device_created';
         const latestReport = [...emergency.timeline]
             .reverse()
             .find((t) => t.event === 'responder_report');
@@ -59,14 +62,21 @@ export async function recordEmergencyNotification(emergency, event, io) {
                 : event === 'emergency.update_requested'
                     ? `Update requested for ${typeLabel}`
                     : `${typeLabel} ${event.replace('emergency.', '').replace(/_/g, ' ')}`;
+        // A hardware panic-button alert is filed before its GNSS receiver has a fix, so
+        // say so plainly instead of leaving the dispatcher to wonder where it came from.
+        const origin = emergency.barangay
+            ? ` from ${emergency.barangay}`
+            : emergency.locationStatus === 'pending'
+                ? ' — waiting for GPS'
+                : '';
         const message = isCreated
-            ? `${sender} sent a ${typeLabel} request${emergency.barangay ? ` from ${emergency.barangay}` : ''}.`
+            ? `${sender} sent a ${typeLabel} request${origin}.`
             : event === 'emergency.responder_report'
                 ? `A responder submitted an incident update${latestReport?.note ? `: ${latestReport.note.slice(0, 160)}` : '.'}`
                 : event === 'emergency.update_requested'
                     ? `Admin requested another responder update${latestUpdateRequest?.note ? `: ${latestUpdateRequest.note.slice(0, 160)}` : '.'}`
                     : `${typeLabel} request ${event.replace('emergency.', '').replace(/_/g, ' ')}.`;
-        const [lng, lat] = emergency.currentLocation.coordinates;
+        const [lng, lat] = emergency.currentLocation?.coordinates ?? [undefined, undefined];
         const doc = await AdminNotification.create({
             type: 'emergency',
             category: event,

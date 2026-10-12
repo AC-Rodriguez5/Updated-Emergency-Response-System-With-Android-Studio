@@ -85,15 +85,22 @@ export async function recordEmergencyNotification(
         : event === 'emergency.update_requested'
           ? `Update requested for ${typeLabel}`
           : `${typeLabel} ${event.replace('emergency.', '').replace(/_/g, ' ')}`;
+    // A hardware panic-button alert is filed before its GNSS receiver has a fix, so
+    // say so plainly instead of leaving the dispatcher to wonder where it came from.
+    const origin = emergency.barangay
+      ? ` from ${emergency.barangay}`
+      : emergency.locationStatus === 'pending'
+        ? ' — waiting for GPS'
+        : '';
     const message = isCreated
-      ? `${sender} sent a ${typeLabel} request${emergency.barangay ? ` from ${emergency.barangay}` : ''}.`
+      ? `${sender} sent a ${typeLabel} request${origin}.`
       : event === 'emergency.responder_report'
         ? `A responder submitted an incident update${latestReport?.note ? `: ${latestReport.note.slice(0, 160)}` : '.'}`
         : event === 'emergency.update_requested'
           ? `Admin requested another responder update${latestUpdateRequest?.note ? `: ${latestUpdateRequest.note.slice(0, 160)}` : '.'}`
           : `${typeLabel} request ${event.replace('emergency.', '').replace(/_/g, ' ')}.`;
 
-    const [lng, lat] = emergency.currentLocation.coordinates;
+    const [lng, lat] = emergency.currentLocation?.coordinates ?? [undefined, undefined];
     const doc = await AdminNotification.create({
       type: 'emergency',
       category: event,

@@ -18,7 +18,11 @@ async function autoJoinRooms(socket, auth) {
             .select('responderRole department agencyType')
             .lean();
         if (responder) {
-            for (const type of emergencyTypesForResponder(responder)) {
+            const types = emergencyTypesForResponder(responder);
+            const feedTypes = types.length > 0
+                ? types
+                : ['medical', 'fire', 'crime', 'general_sos'];
+            for (const type of feedTypes) {
                 socket.join(`responder-feed:${type}`);
             }
         }

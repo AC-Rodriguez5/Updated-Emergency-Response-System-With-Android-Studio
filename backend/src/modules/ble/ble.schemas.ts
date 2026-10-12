@@ -7,6 +7,10 @@ export const pairDeviceSchema = z
     firmwareVersion: z.string().trim().max(40).optional(),
     batteryPercent: z.number().min(0).max(100).optional(),
     fingerprintEnrolled: z.boolean().optional(),
+    // Whether the phone is about to provision this device to post over cellular on
+    // its own. Purely a mirror for the dashboard — nothing in the API is gated on
+    // it, because a device-token request is authenticated the same either way.
+    directCellularEnabled: z.boolean().optional(),
   })
   .strict();
 export type PairDeviceInput = z.infer<typeof pairDeviceSchema>;
@@ -54,6 +58,11 @@ const geoPointSchema = z
   })
   .strict();
 
+// `location` is deliberately optional. The panic button raises the alert the
+// instant the button is released after a fingerprint match, because a victim
+// cannot wait out a cold GNSS start. The incident is created with
+// locationStatus: 'pending' and the device then streams fixes into
+// `deviceLocationSchema` below until the incident is closed.
 export const fromIotSchema = z
   .object({
     deviceId: z.string().trim().min(1).max(100),
@@ -67,9 +76,23 @@ export const fromIotSchema = z
     transport: z.enum(['ble', 'lte']),
     gnssHdop: z.number().min(0).max(99).optional(),
     gnssSatellites: z.number().int().min(0).max(100).optional(),
-    location: geoPointSchema,
+    location: geoPointSchema.optional(),
     barangay: z.string().trim().max(120).optional(),
     notes: z.string().trim().max(500).optional(),
   })
   .strict();
 export type FromIotInput = z.infer<typeof fromIotSchema>;
+
+export const deviceLocationSchema = z
+  .object({
+    deviceId: z.string().trim().min(1).max(100),
+    eventId: z.string().trim().min(1).max(100),
+    transport: z.enum(['ble', 'lte']),
+    location: geoPointSchema,
+    gnssHdop: z.number().min(0).max(99).optional(),
+    gnssSatellites: z.number().int().min(0).max(100).optional(),
+    deviceBatteryAtTrigger: z.number().min(0).max(100).optional(),
+    firmwareVersion: z.string().trim().max(40).optional(),
+  })
+  .strict();
+export type DeviceLocationInput = z.infer<typeof deviceLocationSchema>;

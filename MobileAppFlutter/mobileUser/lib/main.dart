@@ -77,6 +77,7 @@ class _TanzAlertAppState extends ConsumerState<TanzAlertApp>
       _disconnectEmergencySocket();
       final ble = ref.read(bleServiceProvider.notifier);
       ble.onEmergency = null;
+      ble.onDeviceLocation = null;
       unawaited(ble.disconnect());
       ref.read(emergencyProvider.notifier).reset();
     }
@@ -87,8 +88,32 @@ class _TanzAlertAppState extends ConsumerState<TanzAlertApp>
     _startingEmergencySession = true;
     try {
       final ble = ref.read(bleServiceProvider.notifier);
-      ble.onEmergency = (payload) =>
-          ref.read(emergencyProvider.notifier).createFromIot(payload: payload);
+      ble.onEmergency = (payload) async {
+        final delivery = await ref
+            .read(emergencyProvider.notifier)
+            .createFromIot(payload: payload);
+        final em = delivery.emergency;
+        return BleDelivery(
+          accepted: delivery.accepted,
+          emergencyId: em?.id,
+          revision: em?.locationRevision,
+          // An offline-queued alert has no server answer yet, so the device is
+          // left streaming rather than told to stop.
+          tracking: em?.trackingActive ?? true,
+        );
+      };
+      ble.onDeviceLocation = (payload) async {
+        final em = await ref
+            .read(emergencyProvider.notifier)
+            .sendIotLocation(payload: payload);
+        if (em == null) return null;
+        return BleDelivery(
+          accepted: true,
+          emergencyId: em.id,
+          revision: em.locationRevision,
+          tracking: em.trackingActive,
+        );
+      };
       await ble.retryQueuedEvents();
       await ref.read(emergencyProvider.notifier).loadActiveEmergency();
       await _connectEmergencySocket();

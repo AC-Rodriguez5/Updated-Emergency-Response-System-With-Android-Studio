@@ -2,7 +2,7 @@
 
 Emergency Response System for the Tanza Municipal Disaster Risk Reduction and Management Office (MDRRMO), Cavite.
 
-Four components:
+Five components:
 
 | Component | Path | Stack |
 |---|---|---|
@@ -10,6 +10,53 @@ Four components:
 | Admin dashboard | `web/` | React 18 + Vite + Tailwind + TanStack Query + React Router |
 | User mobile app | `MobileAppFlutter/mobileUser/` | Flutter + Riverpod + BLE |
 | Responder mobile app | `MobileAppFlutter/mobileResponder/` | Flutter + Riverpod + flutter_map |
+| Panic-button wearable | `firmware/esp32/` | ESP32-C6 + R502S-A fingerprint + NEO-6M GNSS + SIM7670/A7670 |
+
+## The panic-button wearable
+
+A fingerprint scan followed by a button tap raises one incident against the account the
+device is paired to. See [`WIRING.md`](WIRING.md) for the breadboard build and
+[`firmware/esp32/README.md`](firmware/esp32/README.md) for the full chain, in short:
+
+- **The alert does not wait for GPS.** It is sent on the button release; a cold GNSS start
+  takes minutes. The incident reaches the dashboard immediately, marked **Waiting for GPS**.
+- **The incident carries the sender's registered details** — the same name, age, blood type,
+  address and emergency contact the account registered with — resolved server-side from the
+  device token, so the device never has to carry or transmit them.
+- **The device then streams its position** into that same incident, roughly every 10 seconds,
+  until a dispatcher resolves it. The first fix fills in the location and the map pin appears;
+  it never creates a second incident.
+
+Device-facing routes (device-token auth, no user session):
+
+| Route | Purpose |
+|---|---|
+| `POST /api/device/emergencies` | Raise the alert. `location` is optional. |
+| `POST /api/device/emergencies/location` | One streamed fix. Answers `tracking: false` once the incident is closed, which is how the stream ends. |
+
+The same two steps are available to the paired phone as `POST /api/emergencies/from-iot` and
+`POST /api/emergencies/from-iot/location`, for a wearable with no cellular service of its own.
+Both paths carry the same event ID, so a press delivered over both still produces one incident.
+
+### Enabling direct cellular delivery
+
+By default the wearable relays through the paired phone, which means delivery depends on
+the phone being in range. To have the device post on its own, give the app an APN at
+launch and then **re-pair the wearable** so the setting reaches it:
+
+```powershell
+.\run-mobile-user.ps1 -Apn internet -CaFile ca.pem
+```
+
+`-CaFile` names a root CA already loaded into the modem's own filesystem with
+`AT+CCERTDOWN`. With it, the wearable verifies the backend's certificate. Without it,
+traffic is still encrypted but the server is not authenticated, which exposes the
+device token to a man-in-the-middle — the firmware says so on every boot and the
+pairing screen shows the row as not-ready. See
+[`firmware/esp32/README.md`](firmware/esp32/README.md#direct-cellular-delivery) for how
+to load the CA and for the `l` / `c` / `t` serial checks that bring this up. `t` is the
+acceptance test: it posts to `/api/health` over cellular and tells you whether a button
+press would reach dispatch with the phone switched off.
 
 Mobile apps reach the backend over a Cloudflare quick tunnel so a physical phone (not on the dev laptop's LAN) can hit `localhost:5000` during development.
 

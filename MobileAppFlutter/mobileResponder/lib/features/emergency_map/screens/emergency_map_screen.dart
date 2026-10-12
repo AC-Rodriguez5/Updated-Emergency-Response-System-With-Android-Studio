@@ -137,6 +137,11 @@ class _EmergencyMapScreenState extends ConsumerState<EmergencyMapScreen> {
     }
 
     _socket!.on('emergency.created', handleEvent);
+    _socket!.on('emergency.iot_keychain_created', handleEvent);
+    _socket!.on('emergency.iot_device_created', handleEvent);
+    // The hardware panic button streams fixes for the life of its incident; each
+    // one can move the pin or supply the very first position.
+    _socket!.on('emergency.location_updated', handleEvent);
     _socket!.on('emergency.updated', handleEvent);
     _socket!.on('emergency.assigned', handleEvent);
     _socket!.on('emergency.responder_on_the_way', handleEvent);
@@ -250,7 +255,11 @@ class _EmergencyMapScreenState extends ConsumerState<EmergencyMapScreen> {
                               size: 32,
                             ),
                           ),
-                        ...feed.map(
+                        // Only incidents with a real fix get a pin. A panic-button
+                        // alert that is still searching for satellites would
+                        // otherwise pin itself on the Tanza centre placeholder and
+                        // send a responder to the wrong place.
+                        ...feed.where((em) => em.hasFix).map(
                           (em) => Marker(
                             point: LatLng(em.lat, em.lng),
                             child: GestureDetector(
@@ -549,7 +558,9 @@ class _EmergencyDetailSheet extends StatelessWidget {
           const Divider(),
           _DetailRow(
             'Location',
-            '${emergency.lat.toStringAsFixed(5)}, ${emergency.lng.toStringAsFixed(5)}${emergency.accuracyMeters != null ? ' (±${emergency.accuracyMeters!.toStringAsFixed(0)}m)' : ''}',
+            emergency.hasFix
+                ? '${emergency.lat.toStringAsFixed(5)}, ${emergency.lng.toStringAsFixed(5)}${emergency.accuracyMeters != null ? ' (±${emergency.accuracyMeters!.toStringAsFixed(0)}m)' : ''}'
+                : 'Waiting for GPS — device still searching',
           ),
           if (emergency.barangay != null)
             _DetailRow('Barangay', emergency.barangay!),
@@ -723,18 +734,24 @@ class _OnTheWayRowState extends State<_OnTheWayRow> {
       children: [
         ElevatedButton.icon(
           icon: const Icon(Icons.navigation),
-          label: const Text('Route to scene'),
-          onPressed: () {
-            Navigator.pop(context);
-            context.push(
-              '/route',
-              extra: {
-                'lat': widget.emergency.lat,
-                'lng': widget.emergency.lng,
-                'label': '${widget.emergency.displayType} emergency',
-              },
-            );
-          },
+          label: Text(
+            widget.emergency.hasFix ? 'Route to scene' : 'Waiting for GPS',
+          ),
+          // Routing to the placeholder coordinates would be worse than offering no
+          // route at all, so the button stays disabled until a fix arrives.
+          onPressed: !widget.emergency.hasFix
+              ? null
+              : () {
+                  Navigator.pop(context);
+                  context.push(
+                    '/route',
+                    extra: {
+                      'lat': widget.emergency.lat,
+                      'lng': widget.emergency.lng,
+                      'label': '${widget.emergency.displayType} emergency',
+                    },
+                  );
+                },
         ),
         if (outOfRole) ...[
           const SizedBox(height: 10),

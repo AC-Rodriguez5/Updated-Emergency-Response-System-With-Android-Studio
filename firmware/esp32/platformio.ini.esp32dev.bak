@@ -1,0 +1,14 @@
+[platformio]
+build_dir = ${sysenv.USERPROFILE}/.platformio/build/safealert
+libdeps_dir = ${sysenv.USERPROFILE}/.platformio/libdeps/safealert
+
+[env:esp32dev]
+platform = espressif32@6.9.0
+board = esp32dev
+framework = arduino
+monitor_speed = 115200
+build_flags =
+  -DCORE_DEBUG_LEVEL=1
+lib_deps =
+  bblanchon/ArduinoJson@^7.2.1
+  adafruit/Adafruit Fingerprint Sensor Library@^2.1.3

@@ -2,6 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import type { Server as SocketServer } from 'socket.io';
 import {
   authGuard,
+  deviceLocationLimiter,
   emergencyCreateLimiter,
   roleGuard,
   validateRequest,
@@ -9,12 +10,14 @@ import {
 import { AppError } from '../../shared/middleware/errorHandler.js';
 import {
   bleEventSchema,
+  deviceLocationSchema,
   deviceStatusSchema,
   fromIotSchema,
   idParamSchema,
   pairDeviceSchema,
   unpairBodySchema,
   type BleEventInput,
+  type DeviceLocationInput,
   type DeviceStatusInput,
   type FromIotInput,
   type IdParam,
@@ -121,6 +124,32 @@ iotEmergencyRouter.post(
   },
 );
 
+// The phone relays the fixes it receives over BLE while the wearable has no
+// cellular path of its own. It gets the full incident back because the app renders
+// it; the hardware's own route below gets the compact ack instead.
+iotEmergencyRouter.post(
+  '/location',
+  deviceLocationLimiter,
+  validateRequest({ body: deviceLocationSchema }),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const input = req.validated!.body as DeviceLocationInput;
+      if (input.transport !== 'ble') {
+        throw new AppError('Phone-delivered device events require BLE transport', 400, 'INVALID_TRANSPORT');
+      }
+      const emergency = await svc.recordDeviceLocation(input, req.auth!, ctx(req));
+      res.json({ data: emergency, ack: svc.deviceAck(emergency) });
+    } catch (err) { next(err); }
+  },
+);
+
+function assertDeviceMatchesPayload(req: Request, deviceId: string, transport: string): void {
+  const headerDeviceId = req.header('x-device-id');
+  if (transport !== 'lte' || (headerDeviceId && headerDeviceId !== deviceId)) {
+    throw new AppError('Authenticated LTE device does not match the payload', 400, 'DEVICE_ID_MISMATCH');
+  }
+}
+
 deviceEmergencyRouter.post(
   '/',
   emergencyCreateLimiter,
@@ -128,12 +157,26 @@ deviceEmergencyRouter.post(
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const input = req.validated!.body as FromIotInput;
-      const headerDeviceId = req.header('x-device-id');
-      if (input.transport !== 'lte' || (headerDeviceId && headerDeviceId !== input.deviceId)) {
-        throw new AppError('Authenticated LTE device does not match the payload', 400, 'DEVICE_ID_MISMATCH');
-      }
-      const data = await svc.createFromIot(input, req.auth!, ctx(req));
-      res.status(201).json({ data });
+      assertDeviceMatchesPayload(req, input.deviceId, input.transport);
+      const emergency = await svc.createFromIot(input, req.auth!, ctx(req));
+      res.status(201).json({ data: svc.deviceAck(emergency) });
+    } catch (err) { next(err); }
+  },
+);
+
+// The firmware posts here every few seconds until `tracking` comes back false.
+// A fix for an already-closed incident is the expected way that stream ends, so
+// this answers 200 with tracking: false rather than an error the device would retry.
+deviceEmergencyRouter.post(
+  '/location',
+  deviceLocationLimiter,
+  validateRequest({ body: deviceLocationSchema }),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const input = req.validated!.body as DeviceLocationInput;
+      assertDeviceMatchesPayload(req, input.deviceId, input.transport);
+      const emergency = await svc.recordDeviceLocation(input, req.auth!, ctx(req));
+      res.json({ data: svc.deviceAck(emergency) });
     } catch (err) { next(err); }
   },
 );

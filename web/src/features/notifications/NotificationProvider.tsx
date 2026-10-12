@@ -203,6 +203,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     socket.on('admin_notification.created', onCreated);
     socket.on('emergency.created', refresh);
     socket.on('emergency.iot_keychain_created', refresh);
+    socket.on('emergency.iot_device_created', refresh);
     socket.on('emergency.assigned', refresh);
     socket.on('emergency.resolved', refresh);
     socket.on('emergency.responder_report', refresh);
@@ -211,6 +212,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       socket.off('admin_notification.created', onCreated);
       socket.off('emergency.created', refresh);
       socket.off('emergency.iot_keychain_created', refresh);
+      socket.off('emergency.iot_device_created', refresh);
       socket.off('emergency.assigned', refresh);
       socket.off('emergency.resolved', refresh);
       socket.off('emergency.responder_report', refresh);
