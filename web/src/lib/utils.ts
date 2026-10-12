@@ -22,6 +22,24 @@ export function truncate(str: string, len = 40): string {
   return str.length > len ? str.slice(0, len) + '…' : str;
 }
 
+/**
+ * Coarse "how long ago", for a last-seen column.
+ *
+ * Deliberately vague past an hour: the underlying timestamp only advances when the
+ * owner's phone relays a check-in, so minute-level precision on a two-day-old
+ * value would imply more certainty than the data carries.
+ */
+export function sinceLabel(seconds: number | undefined): string {
+  if (seconds === undefined) return 'Never';
+  if (seconds < 60) return 'Just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hr${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
 export const SOURCE_LABELS: Record<string, string> = {
   mobile_app: 'Mobile App',
   iot_keychain: 'IoT Keychain',

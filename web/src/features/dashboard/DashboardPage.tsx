@@ -1,9 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
   Ambulance,
   Clock,
+  Cpu,
   Users,
   UserCheck,
   ClipboardCheck,
@@ -17,7 +19,7 @@ import { TableSkeleton } from '@/components/ui/Skeleton';
 import { api } from '@/services/apiClient';
 import { getSocket } from '@/services/socketClient';
 import { fmt } from '@/lib/utils';
-import type { Emergency, Paginated } from '@/types';
+import type { DeviceFleet, Emergency, Paginated } from '@/types';
 import { motion } from 'motion/react';
 import { listVariants } from '@/styles/motion';
 
@@ -45,6 +47,18 @@ export default function DashboardPage() {
       return data.data;
     },
     refetchInterval: 30_000,
+  });
+
+  // Fleet readiness belongs on the landing page: a paired wearable with no
+  // fingerprint enrolled cannot raise an alert at all, and nothing else on the
+  // dashboard would reveal that until someone pressed it in an emergency.
+  const { data: fleet } = useQuery({
+    queryKey: ['admin-device-summary'],
+    queryFn: async () => {
+      const { data } = await api.get<{ data: DeviceFleet }>('/admin/devices?limit=1');
+      return data.data.summary;
+    },
+    refetchInterval: 60_000,
   });
 
   const {
@@ -126,6 +140,19 @@ export default function DashboardPage() {
             icon={<ClipboardCheck className="w-6 h-6" />}
             trend={(overview?.pendingApprovals ?? 0) > 0 ? 'Needs review' : undefined}
           />
+          <Link to="/devices" className="min-w-0">
+            <StatCard
+              label="Panic Buttons Online"
+              value={fleet ? `${fleet.online}/${fleet.total - fleet.unpaired}` : '—'}
+              icon={<Cpu className="w-6 h-6" />}
+              urgent={!!fleet?.needsAttention}
+              trend={
+                fleet?.needsAttention
+                  ? `${fleet.needsAttention} cannot raise an alert`
+                  : 'All paired devices ready'
+              }
+            />
+          </Link>
           <StatCard
             label="Resolved Today"
             value={overview?.resolvedToday ?? '—'}

@@ -97,7 +97,7 @@ class BlePairingScreen extends ConsumerWidget {
                 icon: Icons.cell_tower,
                 label: 'Direct cellular delivery',
                 value: !ble.directCellularEnabled
-                    ? 'Off — this build has no HTTPS API URL or APN'
+                    ? 'Off — this build has no HTTPS API URL'
                     : ble.serverCertVerified
                     ? 'On, server certificate verified'
                     : 'On, but the server certificate is NOT verified',
@@ -106,6 +106,23 @@ class BlePairingScreen extends ConsumerWidget {
                 // man-in-the-middle could read, and that should not look green.
                 ready: ble.directCellularEnabled && ble.serverCertVerified,
               ),
+              if (ble.directCellularEnabled)
+                _ReadinessRow(
+                  icon: Icons.sim_card,
+                  label: 'SIM',
+                  value: ble.simBrands.isEmpty
+                      ? 'Reading the SIM…'
+                      : ble.activeApn.isNotEmpty
+                      ? '${ble.simBrands} · APN ${ble.activeApn}'
+                      : ble.cellularOnline
+                      ? '${ble.simBrands} · APN assigned by the network'
+                      : '${ble.simBrands} · APN found on first alert',
+                  // The APN is discovered on the first delivery attempt, so "no APN
+                  // yet" is the normal resting state and should not read as a fault.
+                  ready: ble.simBrands.isNotEmpty &&
+                      !ble.simBrands.startsWith('unknown') &&
+                      !ble.simBrands.startsWith('unrecognised'),
+                ),
               const SizedBox(height: 20),
               if (!ble.fingerprintEnrolled)
                 AppButton(

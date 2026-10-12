@@ -118,7 +118,8 @@ recompiled, and every check reports what a healthy result looks like.
 | `f` | Try the fingerprint scanner at 9600, 19200, 38400, 57600 and 115200 baud, then repeat with the two data wires swapped |
 | `m` | Send `AT` to the modem three times and print exactly what came back |
 | `g` | Count NMEA bytes for 5 s, then say whether the receiver is unwired, searching, or holding a fix |
-| `l` | LTE preflight: SIM, signal, registration, radio, bearer, and what was provisioned |
+| `l` | LTE preflight: SIM, signal, registration, radio, bearer, detected carrier, APN state |
+| `a` | Walk every APN candidate and report which ones actually carry data |
 | `c` | List the modem's certificates and compare them against the provisioned CA filename |
 | `t` | Post to `<apiBase>/health` over cellular — proves direct delivery end to end |
 
@@ -127,9 +128,11 @@ and GND at the sensor before touching the data wires. Likewise, `g` separates th
 faults that look identical from the app: **no bytes at all** means the receiver is unwired or
 unpowered, while **bytes but no fix** means the wiring is correct and it is still searching.
 
-For direct cellular delivery, work `l` → `c` → `t` in that order: `l` finds a SIM, signal or
-registration problem, `c` finds a certificate problem, and `t` confirms the whole path. Setup
-details are in [`README.md`](README.md#direct-cellular-delivery).
+For direct cellular delivery, work `l` → `a` → `c` → `t` in that order: `l` finds a SIM, signal
+or registration problem, `a` finds an APN problem, `c` finds a certificate problem, and `t`
+confirms the whole path. The wearable picks its own APN from the SIM (Globe/TM/GOMO, Smart/TNT,
+DITO, Sun), so no configuration is needed for an ordinary Philippine SIM. Setup details and the
+full carrier table are in [`README.md`](README.md#direct-cellular-delivery).
 
 ## Wiring a 4-pin tactile switch
 

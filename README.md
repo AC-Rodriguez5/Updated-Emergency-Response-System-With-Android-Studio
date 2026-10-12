@@ -34,19 +34,48 @@ Device-facing routes (device-token auth, no user session):
 | `POST /api/device/emergencies` | Raise the alert. `location` is optional. |
 | `POST /api/device/emergencies/location` | One streamed fix. Answers `tracking: false` once the incident is closed, which is how the stream ends. |
 
+### Fleet view
+
+**Devices** in the admin sidebar (`GET /api/admin/devices`) lists every paired
+wearable with its owner, link status, last contact, battery, firmware, delivery path,
+and whether it is currently streaming an incident. The Overview page carries a
+matching tile that links to it.
+
+Two columns answer different questions, and the distinction matters:
+
+- **Status / Last seen** — when the backend last heard from the device. A panic
+  button only contacts the server by itself when it has an alert to send, so the
+  owner's phone relays a Bluetooth check-in every two minutes
+  (`POST /api/user/ble-devices/:id/checkin`) to keep this meaningful. Online means
+  seen within five minutes. **A device can be powered and healthy and still read
+  Offline** because the owner's phone has not been near it or the app is not
+  running — the page says so in as many words.
+- **Readiness** — whether the device would work if pressed *right now*. The case
+  worth watching for is `not_enrolled`: a paired wearable with no fingerprint
+  template physically cannot raise an alert, because the firmware requires a
+  verified finger before it accepts the button. Nothing else in the system would
+  reveal that until someone pressed it in an emergency, so it is counted on the
+  Overview tile and filterable with **Needs attention only**.
+
 The same two steps are available to the paired phone as `POST /api/emergencies/from-iot` and
 `POST /api/emergencies/from-iot/location`, for a wearable with no cellular service of its own.
 Both paths carry the same event ID, so a press delivered over both still produces one incident.
 
 ### Enabling direct cellular delivery
 
-By default the wearable relays through the paired phone, which means delivery depends on
-the phone being in range. To have the device post on its own, give the app an APN at
-launch and then **re-pair the wearable** so the setting reaches it:
+Any HTTPS API URL turns this on, so the standard dev launch already does it — then
+**re-pair the wearable** so the settings reach it:
 
 ```powershell
-.\run-mobile-user.ps1 -Apn internet -CaFile ca.pem
+.\run-mobile-user.ps1 -CaFile ca.pem
 ```
+
+**No APN configuration is needed for any ordinary Philippine SIM.** The firmware reads
+the SIM's home network from its IMSI and picks the APN: Globe, TM and GOMO get
+`internet.globe.com.ph`; Smart and TNT get `internet`; DITO gets `internet.dito.ph`;
+Sun gets `minternet`. An unlisted MVNO falls through to a candidate walk — blank APN
+first, since most current LTE SIMs let the network assign one — and whatever works is
+remembered across reboots. Pass `-Apn <name>` only to override a private APN.
 
 `-CaFile` names a root CA already loaded into the modem's own filesystem with
 `AT+CCERTDOWN`. With it, the wearable verifies the backend's certificate. Without it,
@@ -54,9 +83,9 @@ traffic is still encrypted but the server is not authenticated, which exposes th
 device token to a man-in-the-middle — the firmware says so on every boot and the
 pairing screen shows the row as not-ready. See
 [`firmware/esp32/README.md`](firmware/esp32/README.md#direct-cellular-delivery) for how
-to load the CA and for the `l` / `c` / `t` serial checks that bring this up. `t` is the
-acceptance test: it posts to `/api/health` over cellular and tells you whether a button
-press would reach dispatch with the phone switched off.
+to load the CA, the full carrier table, and the `l` / `a` / `c` / `t` serial checks that
+bring this up. `t` is the acceptance test: it posts to `/api/health` over cellular and
+tells you whether a button press would reach dispatch with the phone switched off.
 
 Mobile apps reach the backend over a Cloudflare quick tunnel so a physical phone (not on the dev laptop's LAN) can hit `localhost:5000` during development.
 

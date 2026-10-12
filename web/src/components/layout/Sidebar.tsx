@@ -2,8 +2,8 @@ import { motion } from 'motion/react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Activity, AlertTriangle, Ambulance, BarChart3, CheckSquare, ChevronLeft,
-  ClipboardList, LayoutDashboard, LogOut, Map, Radio, Settings, Shield, Users,
-  X, Zap,
+  ClipboardList, Cpu, LayoutDashboard, LogOut, Map, Radio, Settings, Shield,
+  Users, X, Zap,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/features/auth/useAuth';
@@ -15,6 +15,7 @@ const NAV = [
   { to: '/dispatch', label: 'Dispatch', icon: Zap },
   { to: '/ambulance-requests', label: 'Ambulance', icon: Ambulance },
   { to: '/map', label: 'Map Center', icon: Map },
+  { to: '/devices', label: 'Devices', icon: Cpu },
   { to: '/approvals', label: 'Approvals', icon: CheckSquare },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
   { to: '/audit', label: 'Audit Logs', icon: ClipboardList },

@@ -126,6 +126,19 @@ uint32_t lastHeartbeat = 0;
 uint32_t lastTrackAt = 0;
 bool buttonHandled = false;
 
+// ---- cellular link state -------------------------------------------------
+// The data bearer and the SSL context both persist inside the modem, so they are
+// set up once per boot rather than on every post. That matters: an open incident
+// posts a fix every 10 s, and re-running AT+NETOPEN and six AT+CSSLCFG commands
+// each time would add seconds of latency to every position update.
+bool bearerUp = false;
+bool tlsConfigured = false;
+uint8_t bearerFailures = 0;
+String activeApn;        // the APN currently carrying traffic
+String simPlmn;          // MCC+MNC read from the SIM, e.g. "51503" for Smart
+String simBrands;        // human label for that network, for the log and the app
+uint32_t nextCarrierReadAt = 20000;  // first SIM read, once the modem has booted
+
 // ---- the incident this device is currently reporting on ------------------
 // Survives a reset: a wearable that browns out mid-incident must come back still
 // streaming, not silently stop. Cleared only when the server says the incident is
@@ -437,6 +450,9 @@ String jsonIdentity() {
   doc["provisioned"] = prefs.getBool("provisioned", false);
   doc["directCellularEnabled"] = directCellularEnabled;
   doc["serverCertVerified"] = prefs.getString("caFile", "").length() > 0;
+  doc["simBrands"] = simBrands;
+  doc["activeApn"] = bearerUp ? activeApn : prefs.getString("apnOk", "");
+  doc["cellularOnline"] = bearerUp;
   doc["enrollmentStatus"] = enrollmentStatus;
   doc["gpsFix"] = haveCurrentFix();
   doc["gpsSatellites"] = fix.satellites;
@@ -469,29 +485,165 @@ bool atOk(const String &command, uint32_t timeoutMs = 3000) {
   return modemCommand(command, timeoutMs).indexOf("OK") >= 0;
 }
 
-// The data bearer and the SSL context both persist inside the modem, so they are
-// set up once per boot rather than on every post. That matters: an open incident
-// posts a fix every 10 s, and re-running AT+NETOPEN and six AT+CSSLCFG commands
-// each time would add seconds of latency to every position update.
-bool bearerUp = false;
-bool tlsConfigured = false;
+// ---- carrier APN table ---------------------------------------------------
+//
+// A wearable is handed out with whatever SIM is cheapest that month, so the APN
+// cannot be a build-time constant. These are the Philippine networks by the home
+// PLMN in the SIM's IMSI (MCC 515). Several retail brands share one network and
+// therefore one APN: TM and GOMO are Globe, TNT is Smart.
+//
+// Sources: ITU/Wikipedia MCC-MNC register for the codes, each carrier's own APN
+// documentation for the names (DITO publishes internet.dito.ph at dito.ph/apn).
+struct ApnEntry {
+  const char *plmn;
+  const char *apn;
+  const char *brands;
+};
+
+constexpr ApnEntry apnTable[] = {
+  {"51502", "internet.globe.com.ph", "Globe / TM / GOMO"},
+  {"51501", "internet.globe.com.ph", "Islacom (Globe)"},
+  {"51524", "internet.globe.com.ph", "ABS-CBN Mobile (on Globe)"},
+  {"51503", "internet",              "Smart / TNT"},
+  {"51518", "internet",              "Cure (Smart)"},
+  {"51505", "minternet",             "Sun Cellular"},
+  {"51566", "internet.dito.ph",      "DITO"},
+};
+
+// Tried in order when the SIM's network is unknown, or when its table APN did not
+// produce a usable bearer. The blank entry comes first on purpose: most current
+// LTE SIMs carry their own profile and the network assigns the right APN, which
+// makes a blank the single most likely candidate to work on an unknown SIM.
+constexpr const char *apnFallbacks[] = {
+  "",                        // let the network assign one from the SIM profile
+  "internet",                // Smart, TNT, DITO data-only, many MVNOs
+  "internet.globe.com.ph",   // Globe, TM, GOMO
+  "internet.dito.ph",        // DITO
+  "smartlte",                // Smart's LTE-specific alternative
+  "minternet",               // Sun Cellular
+  "http.globe.com.ph",       // older Globe profile
+};
+
+constexpr uint8_t maxApnCandidates = 12;
+
+// The modem answers AT+CIMI with the bare IMSI on its own line. Scan for a run of
+// at least 15 digits so a "+CME ERROR: 10" reply (no SIM) cannot be mistaken for
+// one, which would silently pick a wrong carrier's APN.
+String extractImsi(const String &response) {
+  String run;
+  for (size_t i = 0; i <= response.length(); ++i) {
+    const char c = i < response.length() ? response[i] : '\0';
+    if (c >= '0' && c <= '9') { run += c; continue; }
+    if (run.length() >= 15) return run.substring(0, 15);
+    run = "";
+  }
+  return String();
+}
+
+// Identifies the SIM's home network. This is the SIM's own carrier rather than the
+// registered one, which is what APN selection wants: a roaming Globe SIM still
+// needs the Globe APN.
+void detectCarrier() {
+  const String imsi = extractImsi(modemCommand("AT+CIMI", 3000));
+  if (imsi.length() < 5) {
+    simPlmn = "";
+    simBrands = "unknown (no SIM, or the SIM is locked)";
+    Serial.println("[sim] could not read the IMSI - check that a SIM is seated and unlocked");
+    return;
+  }
+  simPlmn = imsi.substring(0, 5);
+  simBrands = "unrecognised network";
+  for (const auto &entry : apnTable) {
+    if (simPlmn == entry.plmn) { simBrands = entry.brands; break; }
+  }
+  // The IMSI identifies the subscriber, so log only the network half of it.
+  Serial.printf("[sim] home network %s = %s\n", simPlmn.c_str(), simBrands.c_str());
+}
+
+/** Orders the APNs to try, most likely first. Returns how many were written. */
+uint8_t buildApnOrder(String *out) {
+  uint8_t count = 0;
+  bool blankQueued = false;
+  auto push = [&](const char *apn) {
+    if (count >= maxApnCandidates) return;
+    const String candidate(apn);
+    // An empty APN is a real candidate, not a missing one, so it needs its own
+    // de-duplication flag rather than being compared as a string.
+    if (!candidate.length()) {
+      if (blankQueued) return;
+      blankQueued = true;
+    } else {
+      for (uint8_t i = 0; i < count; ++i) if (out[i] == candidate) return;
+    }
+    out[count++] = candidate;
+  };
+
+  // 1. An explicitly provisioned APN wins: whoever typed one in knows something
+  //    this table does not.
+  const String provisioned = prefs.getString("apn", "");
+  if (provisioned.length()) push(provisioned.c_str());
+  // 2. Whatever worked last time, so the usual case costs one attempt.
+  const String remembered = prefs.getString("apnOk", "");
+  if (remembered.length()) push(remembered.c_str());
+  // 3. The APN this SIM's carrier documents.
+  for (const auto &entry : apnTable) {
+    if (simPlmn.length() && simPlmn == entry.plmn) push(entry.apn);
+  }
+  // 4. Everything else, blank first.
+  for (const char *apn : apnFallbacks) push(apn);
+  return count;
+}
 
 /**
- * Brings up the packet data bearer.
+ * Tries one APN and reports whether it produced a usable bearer.
  *
- * AT+NETOPEN on an already-open bearer answers with an error, which is harmless
- * but makes the log unreadable, so the result is cached and only re-attempted
- * after a request actually fails.
+ * AT+NETOPEN can answer OK without the network having assigned an address, which
+ * is indistinguishable from a working bearer until the first request times out
+ * thirty seconds later. An actual IP address is the cheap, honest test, so a wrong
+ * APN is rejected in about a second instead of poisoning the next request.
  */
-bool ensureBearer(const String &apn) {
-  if (bearerUp) return true;
+bool tryApn(const String &apn) {
+  modemCommand("AT+NETCLOSE", 5000);          // start from a known state
   atOk("AT+CGDCONT=1,\"IP\",\"" + apn + "\"");
-  const String response = modemCommand("AT+NETOPEN", 15000);
-  // "already opened" is success as far as this device is concerned.
-  bearerUp = response.indexOf("OK") >= 0 || response.indexOf("+NETOPEN: 0") >= 0 ||
-             response.indexOf("already") >= 0;
-  if (!bearerUp) Serial.println("[lte] NETOPEN failed - no data bearer");
-  return bearerUp;
+  const String open = modemCommand("AT+NETOPEN", 20000);
+  if (open.indexOf("OK") < 0 && open.indexOf("already") < 0 &&
+      open.indexOf("+NETOPEN: 0") < 0) {
+    return false;
+  }
+  const String ip = modemCommand("AT+IPADDR", 5000);
+  return ip.indexOf("+IPADDR:") >= 0 && ip.indexOf("0.0.0.0") < 0;
+}
+
+/**
+ * Brings up the packet data bearer, walking the APN candidates until one yields an
+ * IP address. The winner is remembered in NVS so a reboot does not re-search.
+ */
+bool ensureBearer() {
+  if (bearerUp) return true;
+  if (!simPlmn.length()) detectCarrier();
+
+  String order[maxApnCandidates];
+  const uint8_t count = buildApnOrder(order);
+  for (uint8_t i = 0; i < count; ++i) {
+    const String &apn = order[i];
+    Serial.printf("[lte] trying APN %u/%u: %s\n", i + 1, count,
+                  apn.length() ? apn.c_str() : "(blank - network assigned)");
+    if (tryApn(apn)) {
+      activeApn = apn;
+      prefs.putString("apnOk", apn);
+      bearerUp = true;
+      Serial.printf("[lte] connected on %s\n",
+                    apn.length() ? apn.c_str() : "(blank - network assigned)");
+      return true;
+    }
+    pumpHeartbeat();
+    pumpGnss();
+  }
+  Serial.printf("[lte] no APN produced a data connection (tried %u). The SIM reports\n", count);
+  Serial.printf("      %s. Press 'l' to check registration first - an unregistered\n",
+                simBrands.length() ? simBrands.c_str() : "no network");
+  Serial.println("      modem fails every APN identically. Press 'a' to retry the walk.");
+  return false;
 }
 
 /**
@@ -545,16 +697,17 @@ bool postOverLte(const String &path, const String &body, String &responseBody) {
   if (!directCellularEnabled) { Serial.println("[lte] skipped: direct cellular disabled"); return false; }
   const String apiBase = prefs.getString("apiBase", "");
   const String token = prefs.getString("token", "");
-  const String apn = prefs.getString("apn", "");
-  if (!apiBase.startsWith("https://") || !token.length() || !apn.length()) {
+  // No APN check: it is discovered from the SIM rather than provisioned, so a
+  // device handed any Philippine SIM can still deliver.
+  if (!apiBase.startsWith("https://") || !token.length()) {
     // Never log the token itself, only whether one is present.
-    Serial.printf("[lte] skipped: https=%d token=%d apn=%d\n",
-                  apiBase.startsWith("https://") ? 1 : 0, token.length() ? 1 : 0, apn.length() ? 1 : 0);
+    Serial.printf("[lte] skipped: https=%d token=%d\n",
+                  apiBase.startsWith("https://") ? 1 : 0, token.length() ? 1 : 0);
     return false;
   }
   Serial.printf("[lte] POST %s\n", path.c_str());
   modemCommand("AT+HTTPTERM");
-  if (!ensureBearer(apn)) return false;
+  if (!ensureBearer()) return false;
   // An https:// base without a configured SSL context fails the handshake, and
   // posting the device token over an unconfigured context is not worth the attempt.
   if (!ensureTls()) return false;
@@ -585,8 +738,19 @@ bool postOverLte(const String &path, const String &body, String &responseBody) {
     // cached bearer state and re-dial on the next attempt.
     bearerUp = false;
     Serial.println("[lte] no HTTPACTION response (check antenna, APN, registration)");
+    // An APN that brings up a bearer but never completes a request is the
+    // signature of a swapped SIM. Forget the remembered one after two failures so
+    // the next attempt searches the table again instead of retrying it forever.
+    if (++bearerFailures >= 2) {
+      bearerFailures = 0;
+      if (prefs.getString("apnOk", "").length()) {
+        Serial.println("[lte] forgetting the remembered APN - it connects but carries nothing");
+        prefs.remove("apnOk");
+      }
+    }
     return false;
   }
+  bearerFailures = 0;
   const int status = response.substring(marker + 15).toInt();
   // Third field of +HTTPACTION: 1,<status>,<length>
   long length = 0;
@@ -1022,13 +1186,56 @@ void probeLte() {
   }
   const String apiBase = prefs.getString("apiBase", "");
   const String caFile = prefs.getString("caFile", "");
+  detectCarrier();
   Serial.printf("[lte] apiBase=%s\n", apiBase.length() ? apiBase.c_str() : "(not provisioned)");
-  Serial.printf("[lte] apn=%s token=%s\n",
-                prefs.getString("apn", "(none)").c_str(),
+  Serial.printf("[lte] token=%s\n",
                 prefs.getString("token", "").length() ? "present" : "MISSING");
+  const String override_ = prefs.getString("apn", "");
+  const String remembered = prefs.getString("apnOk", "");
+  Serial.printf("[apn] sim=%s  override=%s  remembered=%s  active=%s\n",
+                simBrands.c_str(),
+                override_.length() ? override_.c_str() : "(none)",
+                remembered.length() ? remembered.c_str() : "(none yet)",
+                bearerUp ? (activeApn.length() ? activeApn.c_str() : "(blank)") : "(not connected)");
   Serial.printf("[lte] direct delivery=%s  server verification=%s\n",
                 directCellularEnabled ? "enabled" : "DISABLED (re-pair to enable)",
                 caFile.length() ? caFile.c_str() : "OFF - no CA loaded");
+}
+
+// Walks every APN candidate and reports which ones actually carry data. This is
+// the carrier equivalent of the 'f' scanner hunt: it turns "cellular does not
+// work" into a specific answer about this SIM, without recompiling.
+void probeApn() {
+  detectCarrier();
+  String order[maxApnCandidates];
+  const uint8_t count = buildApnOrder(order);
+  Serial.printf("[probe] SIM reports %s. Trying %u APN candidate(s)...\n",
+                simBrands.c_str(), count);
+  uint8_t working = 0;
+  String firstWorking;
+  for (uint8_t i = 0; i < count; ++i) {
+    const String &apn = order[i];
+    const char *label = apn.length() ? apn.c_str() : "(blank - network assigned)";
+    const bool ok = tryApn(apn);
+    Serial.printf("  %-26s %s\n", label, ok ? "CARRIES DATA" : "no address");
+    if (ok && !working++) firstWorking = apn;
+    pumpHeartbeat();
+    pumpGnss();
+  }
+  if (working) {
+    activeApn = firstWorking;
+    prefs.putString("apnOk", firstWorking);
+    bearerUp = true;
+    Serial.printf("[probe] %u of %u worked. Remembered %s for future boots.\n",
+                  working, count,
+                  firstWorking.length() ? firstWorking.c_str() : "(blank)");
+    Serial.println("[probe] press 't' to confirm the backend is reachable on it.");
+  } else {
+    bearerUp = false;
+    Serial.println("[probe] none of them carried data. That is almost never the APN:");
+    Serial.println("        press 'l' and check the SIM is seated, has load//a data plan,");
+    Serial.println("        the antenna is connected, and registration reports ,1 or ,5.");
+  }
 }
 
 // Lists the certificates in the modem's filesystem. "no CA loaded" and "wrong CA
@@ -1059,20 +1266,18 @@ void probeCerts() {
 // raising a real incident.
 void probeDirectDelivery() {
   const String apiBase = prefs.getString("apiBase", "");
-  const String apn = prefs.getString("apn", "");
   if (!directCellularEnabled) {
-    Serial.println("[probe] direct LTE is disabled on this device. Re-pair from the app with");
-    Serial.println("        an HTTPS API URL and a cellular APN configured.");
+    Serial.println("[probe] direct LTE is disabled on this device. Re-pair from the app");
+    Serial.println("        with an HTTPS API URL configured.");
     return;
   }
-  if (!apiBase.startsWith("https://") || !apn.length()) {
-    Serial.printf("[probe] not provisioned for direct LTE: https=%d apn=%d\n",
-                  apiBase.startsWith("https://") ? 1 : 0, apn.length() ? 1 : 0);
+  if (!apiBase.startsWith("https://")) {
+    Serial.println("[probe] not provisioned for direct LTE: the API URL is not https://");
     return;
   }
   Serial.printf("[probe] GET %s/health over cellular...\n", apiBase.c_str());
   modemCommand("AT+HTTPTERM");
-  if (!ensureBearer(apn)) return;
+  if (!ensureBearer()) return;
   if (!ensureTls()) return;
   if (modemCommand("AT+HTTPINIT", 5000).indexOf("OK") < 0) {
     Serial.println("[probe] HTTPINIT failed");
@@ -1131,6 +1336,13 @@ void printBanner() {
     Serial.printf("direct LTE         : enabled, server cert %s\n",
                   caFile.length() ? ("verified against " + caFile).c_str()
                                   : "NOT VERIFIED - no CA loaded (press 'c')");
+    const String remembered = prefs.getString("apnOk", "");
+    Serial.printf("sim / apn          : %s / %s\n",
+                  simBrands.length() ? simBrands.c_str() : "not read yet (press 'l')",
+                  bearerUp ? (activeApn.length() ? activeApn.c_str() : "(blank)")
+                           : remembered.length()
+                               ? (remembered + " (remembered)").c_str()
+                               : "will be found automatically (press 'a')");
   } else {
     Serial.println("direct LTE         : disabled - re-pair from the app to enable");
   }
@@ -1160,7 +1372,8 @@ void printBanner() {
   Serial.println("pulses: 1 queued  3 server confirmed  2 rejected  5 storage failure");
   Serial.println("serial keys: p = pad levels  b = button test  f = hunt for scanner");
   Serial.println("             m = modem AT    g = gps status   l = lte preflight");
-  Serial.println("             c = modem certs t = test direct LTE delivery end to end");
+  Serial.println("             a = hunt for a working APN        c = modem certs");
+  Serial.println("             t = test direct LTE delivery end to end");
   Serial.println("=========================================");
 }
 
@@ -1213,6 +1426,7 @@ void loop() {
       case 'm': case 'M': probeModem(); break;
       case 'g': case 'G': probeGnss(); break;
       case 'l': case 'L': probeLte(); break;
+      case 'a': case 'A': probeApn(); break;
       case 'c': case 'C': probeCerts(); break;
       case 't': case 'T': probeDirectDelivery(); break;
       default: printBanner(); break;
@@ -1286,6 +1500,16 @@ void loop() {
   if (millis() - lastHeartbeat >= heartbeatIntervalMs) {
     lastHeartbeat = millis();
     if (heartbeatCharacteristic) { heartbeatCharacteristic->setValue(String(millis()).c_str()); heartbeatCharacteristic->notify(); }
+    // Read the SIM once the modem has had time to finish its own boot, so the app
+    // can name the carrier before any alert is sent. Not done in setup(): a modem
+    // asked for its IMSI too early simply answers nothing. A missing or locked SIM
+    // backs off to once a minute rather than blocking the loop for 3 s on every
+    // heartbeat, while still noticing a SIM inserted later.
+    if (directCellularEnabled && !simPlmn.length() &&
+        static_cast<int32_t>(millis() - nextCarrierReadAt) >= 0) {
+      detectCarrier();
+      nextCarrierReadAt = millis() + 60000;
+    }
     if (hasPending()) deliverPending();
     refreshIdentity();
   }

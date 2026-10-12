@@ -27,8 +27,12 @@ class AppConfig {
       '9f4d0003-7d6a-4b85-9e74-2f4d8e8d0003';
   static const String configCharUuid = '9f4d0004-7d6a-4b85-9e74-2f4d8e8d0004';
 
-  /// Carrier APN the wearable's modem dials. Direct cellular delivery cannot work
-  /// without it, so leaving it empty is what keeps the feature off.
+  /// Optional APN override for the wearable's modem.
+  ///
+  /// Normally leave this empty: the firmware reads the SIM's home network from its
+  /// IMSI and picks the matching APN (Globe/TM/GOMO, Smart/TNT, DITO, Sun), then
+  /// falls back to walking every known APN until one carries data. Set this only
+  /// for a SIM the table does not cover — an MVNO or a private APN.
   static const String cellularApn = String.fromEnvironment(
     'CELLULAR_APN',
     defaultValue: '',
@@ -50,12 +54,12 @@ class AppConfig {
 
   /// Whether this build can provision the wearable for direct cellular delivery.
   ///
-  /// Requires an HTTPS API (the firmware refuses plaintext outright) and an APN.
-  /// Certificate verification is reported separately rather than gating delivery:
-  /// a panic button that can reach dispatch unverified is worth more than one that
-  /// cannot reach it at all, and [modemCaFile] is how you close that gap.
-  static bool get directCellularReady =>
-      apiBaseUrl.startsWith('https://') && cellularApn.isNotEmpty;
+  /// Only an HTTPS API is required — the firmware refuses plaintext outright, and
+  /// it discovers the APN from the SIM itself. Certificate verification is reported
+  /// separately rather than gating delivery: a panic button that can reach dispatch
+  /// unverified is worth more than one that cannot reach it at all, and
+  /// [modemCaFile] is how you close that gap.
+  static bool get directCellularReady => apiBaseUrl.startsWith('https://');
 
   static bool get modemVerifiesServer => modemCaFile.isNotEmpty;
 

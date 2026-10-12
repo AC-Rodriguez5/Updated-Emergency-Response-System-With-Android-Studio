@@ -6,6 +6,10 @@ export const pairDeviceSchema = z
     firmwareVersion: z.string().trim().max(40).optional(),
     batteryPercent: z.number().min(0).max(100).optional(),
     fingerprintEnrolled: z.boolean().optional(),
+    // Whether the phone is about to provision this device to post over cellular on
+    // its own. Purely a mirror for the dashboard — nothing in the API is gated on
+    // it, because a device-token request is authenticated the same either way.
+    directCellularEnabled: z.boolean().optional(),
 })
     .strict();
 export const idParamSchema = z
@@ -22,6 +26,18 @@ export const deviceStatusSchema = z
 })
     .strict()
     .refine((value) => Object.keys(value).length > 0, 'Provide at least one status field');
+/**
+ * A liveness report relayed by the owner's phone while it holds a Bluetooth link
+ * to the wearable. Every field is optional because the only payload that matters
+ * is the fact of the call.
+ */
+export const deviceCheckInSchema = z
+    .object({
+    batteryPercent: z.number().min(0).max(100).optional(),
+    firmwareVersion: z.string().trim().max(40).optional(),
+    rssi: z.number().min(-200).max(0).optional(),
+})
+    .strict();
 export const bleEventSchema = z
     .object({
     deviceId: z.string().trim().min(1).max(100),

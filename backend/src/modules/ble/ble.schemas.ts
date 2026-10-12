@@ -35,6 +35,20 @@ export const deviceStatusSchema = z
   .refine((value) => Object.keys(value).length > 0, 'Provide at least one status field');
 export type DeviceStatusInput = z.infer<typeof deviceStatusSchema>;
 
+/**
+ * A liveness report relayed by the owner's phone while it holds a Bluetooth link
+ * to the wearable. Every field is optional because the only payload that matters
+ * is the fact of the call.
+ */
+export const deviceCheckInSchema = z
+  .object({
+    batteryPercent: z.number().min(0).max(100).optional(),
+    firmwareVersion: z.string().trim().max(40).optional(),
+    rssi: z.number().min(-200).max(0).optional(),
+  })
+  .strict();
+export type DeviceCheckInInput = z.infer<typeof deviceCheckInSchema>;
+
 export const bleEventSchema = z
   .object({
     deviceId: z.string().trim().min(1).max(100),

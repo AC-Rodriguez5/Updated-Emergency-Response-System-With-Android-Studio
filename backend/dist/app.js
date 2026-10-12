@@ -5,7 +5,7 @@ import mongoSanitize from 'express-mongo-sanitize';
 import { env } from './config/env.js';
 import { requestId, errorHandler, notFoundHandler, } from './shared/middleware/index.js';
 import { authRoutes } from './modules/auth/index.js';
-import { adminApprovalsRoutes, adminAuditRoutes, adminRespondersRoutes, adminAmbulanceUnitsRoutes, adminReportsRoutes, } from './modules/admin/index.js';
+import { adminApprovalsRoutes, adminAuditRoutes, adminRespondersRoutes, adminAmbulanceUnitsRoutes, adminReportsRoutes, adminDevicesRoutes, } from './modules/admin/index.js';
 import { emergenciesRoutes, adminEmergenciesRoutes } from './modules/emergencies/index.js';
 import { ambulanceUserRoutes, ambulanceAdminRoutes, ambulanceResponderRoutes, } from './modules/ambulance/index.js';
 import { bleDeviceRouter, bleEventRouter, iotEmergencyRouter, deviceEmergencyRouter, } from './modules/ble/index.js';
@@ -51,6 +51,7 @@ export function createApp() {
     app.use('/api/admin', adminRespondersRoutes);
     app.use('/api/admin', adminAmbulanceUnitsRoutes);
     app.use('/api/admin', adminReportsRoutes);
+    app.use('/api/admin', adminDevicesRoutes);
     app.use('/api/admin/emergencies', adminEmergenciesRoutes);
     app.use('/api/emergencies', emergenciesRoutes);
     app.use('/api/ambulance-requests', ambulanceUserRoutes);

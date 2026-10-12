@@ -17,6 +17,7 @@ import {
   adminRespondersRoutes,
   adminAmbulanceUnitsRoutes,
   adminReportsRoutes,
+  adminDevicesRoutes,
 } from './modules/admin/index.js';
 import { emergenciesRoutes, adminEmergenciesRoutes } from './modules/emergencies/index.js';
 import {
@@ -84,6 +85,7 @@ export function createApp(): Express {
   app.use('/api/admin', adminRespondersRoutes);
   app.use('/api/admin', adminAmbulanceUnitsRoutes);
   app.use('/api/admin', adminReportsRoutes);
+  app.use('/api/admin', adminDevicesRoutes);
   app.use('/api/admin/emergencies', adminEmergenciesRoutes);
   app.use('/api/emergencies', emergenciesRoutes);
   app.use('/api/ambulance-requests', ambulanceUserRoutes);
