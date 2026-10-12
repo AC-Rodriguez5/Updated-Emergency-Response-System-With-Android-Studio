@@ -8,7 +8,7 @@ import { authRoutes } from './modules/auth/index.js';
 import { adminApprovalsRoutes, adminAuditRoutes, adminRespondersRoutes, adminAmbulanceUnitsRoutes, adminReportsRoutes, } from './modules/admin/index.js';
 import { emergenciesRoutes, adminEmergenciesRoutes } from './modules/emergencies/index.js';
 import { ambulanceUserRoutes, ambulanceAdminRoutes, ambulanceResponderRoutes, } from './modules/ambulance/index.js';
-import { bleDeviceRouter, bleEventRouter, iotEmergencyRouter } from './modules/ble/index.js';
+import { bleDeviceRouter, bleEventRouter, iotEmergencyRouter, deviceEmergencyRouter, } from './modules/ble/index.js';
 import { locationsRouter, emergencyHistoryRouter, ambulanceHistoryRouter, respondersLiveRouter, } from './modules/locations/index.js';
 import { filesRoutes } from './modules/files/index.js';
 import { notificationsRoutes } from './modules/notifications/index.js';
@@ -59,6 +59,7 @@ export function createApp() {
     app.use('/api/user/ble-devices', bleDeviceRouter);
     app.use('/api/user/ble-events', bleEventRouter);
     app.use('/api/emergencies/from-iot', iotEmergencyRouter);
+    app.use('/api/device/emergencies', deviceEmergencyRouter);
     app.use('/api/locations', locationsRouter);
     app.use('/api/emergencies', emergencyHistoryRouter);
     app.use('/api/ambulance-requests', ambulanceHistoryRouter);

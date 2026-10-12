@@ -91,6 +91,9 @@ export async function createEmergency(
       accuracyMeters: input.location.accuracyMeters,
       capturedAt: new Date(input.location.capturedAt),
     },
+    locationStatus: 'fixed',
+    locationRevision: 1,
+    lastLocationAt: new Date(),
     isInsideTanza: scope.isInsideTanza,
     outsideScopeFlag: scope.outsideScopeFlag,
     barangay: input.barangay,
@@ -253,6 +256,9 @@ export async function cancel(
   }
   doc.status = 'cancelled';
   doc.cancelledAt = new Date();
+  // Closing the incident is what stops a hardware panic button transmitting: it
+  // reads this back on its next position post and then goes quiet.
+  doc.trackingActive = false;
   doc.timeline.push({
     event: 'cancelled',
     at: new Date(),
@@ -510,6 +516,9 @@ export async function resolve(
   doc.status = 'resolved';
   doc.resolvedAt = new Date();
   doc.resolvedBy = new mongoose.Types.ObjectId(auth.accountId);
+  // Stops a hardware panic button's position stream — it learns this from the
+  // reply to its next post.
+  doc.trackingActive = false;
   doc.timeline.push({
     event: 'resolved',
     at: new Date(),

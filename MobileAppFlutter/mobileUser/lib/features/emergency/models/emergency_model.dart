@@ -11,6 +11,17 @@ class EmergencyModel {
   final DateTime createdAt;
   final String? assignedResponderId;
 
+  /// `pending` until the hardware panic button lands its first GNSS fix. The
+  /// incident is live and dispatchable either way.
+  final String locationStatus;
+
+  /// Count of position updates the server has accepted for this incident. The
+  /// wearable echoes it back as `Server confirmed ... revision ...`.
+  final int locationRevision;
+
+  /// True while the wearable should keep streaming its position.
+  final bool trackingActive;
+
   const EmergencyModel({
     required this.id,
     required this.type,
@@ -23,6 +34,9 @@ class EmergencyModel {
     this.notes,
     required this.createdAt,
     this.assignedResponderId,
+    this.locationStatus = 'fixed',
+    this.locationRevision = 0,
+    this.trackingActive = false,
   });
 
   factory EmergencyModel.fromJson(Map<String, dynamic> json) {
@@ -40,6 +54,9 @@ class EmergencyModel {
           ? DateTime.tryParse(json['createdAt'] as String) ?? DateTime.now()
           : DateTime.now(),
       assignedResponderId: json['assignedResponderId'] as String?,
+      locationStatus: json['locationStatus'] as String? ?? 'fixed',
+      locationRevision: (json['locationRevision'] as num?)?.toInt() ?? 0,
+      trackingActive: json['trackingActive'] as bool? ?? false,
     );
   }
 
@@ -55,9 +72,14 @@ class EmergencyModel {
     if (notes != null) 'notes': notes,
     'createdAt': createdAt.toUtc().toIso8601String(),
     if (assignedResponderId != null) 'assignedResponderId': assignedResponderId,
+    'locationStatus': locationStatus,
+    'locationRevision': locationRevision,
+    'trackingActive': trackingActive,
   };
 
   bool get isActive => !['resolved', 'cancelled'].contains(status);
+  bool get isAwaitingGps => locationStatus == 'pending';
+  bool get isFromPanicButton => source == 'iot_device';
   bool get canCancel => status == 'pending';
 
   String get displayType => switch (type) {

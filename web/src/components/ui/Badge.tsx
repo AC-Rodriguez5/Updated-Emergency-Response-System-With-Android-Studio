@@ -80,6 +80,30 @@ export function TypeBadge({ type, source }: { type: string; source?: string }) {
       {source === 'iot_keychain' && (
         <Badge variant="blue" className="text-[10px]">IoT</Badge>
       )}
+      {source === 'iot_device' && (
+        <Badge variant="red" className="text-[10px]">DEVICE</Badge>
+      )}
     </div>
   );
+}
+
+/**
+ * Says whether a hardware incident has a position yet, and whether its device is
+ * still transmitting. A dispatcher needs both: "no coordinates" alone does not
+ * distinguish a receiver still searching from a device that has gone silent.
+ */
+export function LocationStatusBadge({
+  locationStatus,
+  trackingActive,
+}: {
+  locationStatus?: string;
+  trackingActive?: boolean;
+}) {
+  if (locationStatus === 'pending') {
+    return <Badge variant="amber">Waiting for GPS</Badge>;
+  }
+  if (trackingActive) {
+    return <Badge variant="green">Live GPS</Badge>;
+  }
+  return null;
 }

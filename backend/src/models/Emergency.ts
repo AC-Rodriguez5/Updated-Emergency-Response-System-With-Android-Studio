@@ -12,6 +12,15 @@ export type EmergencyStatus =
   | 'resolved'
   | 'cancelled';
 
+/**
+ * `pending` means the incident exists but no position is known yet. The hardware
+ * panic button deliberately raises the alert on the button press and only then
+ * starts hunting for a GNSS fix, so an incident can live for a minute or two with
+ * no coordinates at all. Every consumer must treat `currentLocation` as absent
+ * while this is `pending`.
+ */
+export type EmergencyLocationStatus = 'pending' | 'fixed';
+
 export interface ITimelineEvent {
   event: string;
   at: Date;
@@ -44,12 +53,17 @@ export interface IEmergency extends Document {
   status: EmergencyStatus;
   userId: mongoose.Types.ObjectId;
   assignedResponderId?: mongoose.Types.ObjectId;
-  currentLocation: {
+  currentLocation?: {
     type: 'Point';
     coordinates: [number, number];
     accuracyMeters?: number;
     capturedAt: Date;
   };
+  locationStatus: EmergencyLocationStatus;
+  locationRevision: number;
+  locationFirstFixAt?: Date;
+  lastLocationAt?: Date;
+  trackingActive: boolean;
   isInsideTanza: boolean;
   barangay?: string;
   municipality?: string;
@@ -111,6 +125,22 @@ const userSnapshotSchema = new Schema<IEmergencyUserSnapshot>(
   { _id: false },
 );
 
+// A single-nested schema rather than an inline nested path. A nested path with a
+// `default` on `type` makes Mongoose materialise `{ type: 'Point' }` with no
+// coordinates the moment the parent document is created, and MongoDB rejects that
+// half-built shape when it reaches the 2dsphere index. As a subdocument the field
+// stays genuinely absent until a real fix arrives, and a 2dsphere index already
+// skips documents that do not have the field at all.
+const currentLocationSchema = new Schema<NonNullable<IEmergency['currentLocation']>>(
+  {
+    type: { type: String, enum: ['Point'], required: true, default: 'Point' },
+    coordinates: { type: [Number], required: true },
+    accuracyMeters: { type: Number, min: 0, max: 5000 },
+    capturedAt: { type: Date, required: true },
+  },
+  { _id: false },
+);
+
 const emergencySchema = new Schema<IEmergency>(
   {
     type: {
@@ -145,12 +175,20 @@ const emergencySchema = new Schema<IEmergency>(
     },
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     assignedResponderId: { type: Schema.Types.ObjectId, ref: 'Responder' },
-    currentLocation: {
-      type: { type: String, enum: ['Point'], required: true, default: 'Point' },
-      coordinates: { type: [Number], required: true },
-      accuracyMeters: { type: Number, min: 0, max: 5000 },
-      capturedAt: { type: Date, required: true },
+    currentLocation: { type: currentLocationSchema, required: false },
+    locationStatus: {
+      type: String,
+      enum: ['pending', 'fixed'],
+      default: 'fixed',
+      required: true,
     },
+    locationRevision: { type: Number, default: 0, min: 0, required: true },
+    locationFirstFixAt: { type: Date },
+    lastLocationAt: { type: Date },
+    // True while the hardware button should keep streaming its position. Cleared
+    // when the incident is resolved or cancelled, which is how the device learns
+    // to stop transmitting.
+    trackingActive: { type: Boolean, default: false, required: true },
     isInsideTanza: { type: Boolean, default: false, required: true },
     barangay: { type: String, trim: true, maxlength: 120 },
     municipality: { type: String, trim: true, maxlength: 120 },
@@ -189,5 +227,7 @@ emergencySchema.index(
 );
 emergencySchema.index({ currentLocation: '2dsphere' });
 emergencySchema.index({ outsideScopeFlag: 1, status: 1 });
+// The panic button re-posts its position every few seconds against this triple.
+emergencySchema.index({ sourceDeviceId: 1, hardwareEventId: 1, trackingActive: 1 });
 
 export const Emergency = mongoose.model<IEmergency>('Emergency', emergencySchema);

@@ -28,6 +28,17 @@ class EmergencyError extends EmergencyState {
   EmergencyError(this.message);
 }
 
+/// Outcome of relaying one hardware alert to the backend.
+class IotDelivery {
+  /// False only when the wearable should keep the alert queued and retry.
+  final bool accepted;
+
+  /// The server-side incident, when one was created on this attempt.
+  final EmergencyModel? emergency;
+
+  const IotDelivery({required this.accepted, this.emergency});
+}
+
 class EmergencyNotifier extends StateNotifier<EmergencyState> {
   static const _activeEmergencyCacheKey = 'active_emergency';
 
@@ -123,23 +134,53 @@ class EmergencyNotifier extends StateNotifier<EmergencyState> {
     }
   }
 
-  Future<bool> createFromIot({required Map<String, dynamic> payload}) async {
+  /// Delivers a hardware panic-button alert.
+  ///
+  /// Returns [IotDelivery.accepted] false only when the alert must stay on the
+  /// wearable for a later retry. A network failure still counts as accepted: the
+  /// payload is handed to the offline queue, so re-sending it from the device
+  /// would duplicate it. [IotDelivery.emergency] is null in exactly that case,
+  /// because no server-side incident exists yet to report a revision for.
+  Future<IotDelivery> createFromIot({
+    required Map<String, dynamic> payload,
+  }) async {
     state = EmergencyCreating();
     try {
       final em = await _repo.createFromIot(payload: payload);
       setActive(em);
-      return true;
+      return IotDelivery(accepted: true, emergency: em);
     } on ApiException catch (e) {
       if (e.statusCode == null) {
         await _syncService.queueIot(payload);
         state = EmergencyQueued();
-        return true;
+        return const IotDelivery(accepted: true);
       }
       state = EmergencyError('Failed to send IoT emergency: ${e.message}');
-      return false;
+      return const IotDelivery(accepted: false);
     } catch (_) {
       state = EmergencyError('Failed to send IoT emergency.');
-      return false;
+      return const IotDelivery(accepted: false);
+    }
+  }
+
+  /// Relays one GNSS fix from the wearable and reports back what the server says.
+  ///
+  /// Returns null when the fix could not be delivered, which leaves the wearable
+  /// transmitting — the safe default, since a lost reply must never be read as
+  /// "the incident is closed".
+  Future<EmergencyModel?> sendIotLocation({
+    required Map<String, dynamic> payload,
+  }) async {
+    try {
+      final em = await _repo.sendIotLocation(payload: payload);
+      if (em.isActive) {
+        setActive(em);
+      } else {
+        reset();
+      }
+      return em;
+    } catch (_) {
+      return null;
     }
   }
 

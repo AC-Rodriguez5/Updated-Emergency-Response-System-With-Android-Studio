@@ -27,19 +27,37 @@ class AppConfig {
       '9f4d0003-7d6a-4b85-9e74-2f4d8e8d0003';
   static const String configCharUuid = '9f4d0004-7d6a-4b85-9e74-2f4d8e8d0004';
 
+  /// Carrier APN the wearable's modem dials. Direct cellular delivery cannot work
+  /// without it, so leaving it empty is what keeps the feature off.
   static const String cellularApn = String.fromEnvironment(
     'CELLULAR_APN',
     defaultValue: '',
   );
-  static const bool modemTlsValidated = bool.fromEnvironment(
-    'MODEM_TLS_VALIDATED',
-    defaultValue: false,
+
+  /// Filename of a root CA **already loaded into the modem's own filesystem** with
+  /// `AT+CCERTDOWN` — not the certificate itself, which would not fit in a BLE
+  /// write. Provisioning this name makes the wearable verify the backend's
+  /// certificate (`AT+CSSLCFG="authmode",0,1`).
+  ///
+  /// Left empty, the wearable still posts over TLS but does not authenticate the
+  /// server, so its device token is exposed to a man-in-the-middle. That state is
+  /// surfaced on the pairing screen and logged by the firmware on every boot
+  /// rather than being hidden.
+  static const String modemCaFile = String.fromEnvironment(
+    'MODEM_CA_FILE',
+    defaultValue: '',
   );
 
+  /// Whether this build can provision the wearable for direct cellular delivery.
+  ///
+  /// Requires an HTTPS API (the firmware refuses plaintext outright) and an APN.
+  /// Certificate verification is reported separately rather than gating delivery:
+  /// a panic button that can reach dispatch unverified is worth more than one that
+  /// cannot reach it at all, and [modemCaFile] is how you close that gap.
   static bool get directCellularReady =>
-      apiBaseUrl.startsWith('https://') &&
-      cellularApn.isNotEmpty &&
-      modemTlsValidated;
+      apiBaseUrl.startsWith('https://') && cellularApn.isNotEmpty;
+
+  static bool get modemVerifiesServer => modemCaFile.isNotEmpty;
 
   static const double tanzaMinLat = 14.30;
   static const double tanzaMaxLat = 14.42;

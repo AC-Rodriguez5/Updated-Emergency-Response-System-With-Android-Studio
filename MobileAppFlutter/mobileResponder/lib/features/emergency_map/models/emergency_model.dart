@@ -6,6 +6,11 @@ class EmergencyModel {
   final String status;
   final double lat;
   final double lng;
+  /// False while the hardware panic button is still searching for a GNSS fix. The
+  /// alert is real and already dispatchable, but [lat]/[lng] are the Tanza centre
+  /// placeholder, not the sender's position. Never navigate on a false value.
+  final bool hasFix;
+  final String locationStatus;
   final double? accuracyMeters;
   final bool isInsideTanza;
   final bool outsideScopeFlag;
@@ -27,6 +32,8 @@ class EmergencyModel {
     required this.status,
     required this.lat,
     required this.lng,
+    this.hasFix = true,
+    this.locationStatus = 'fixed',
     this.accuracyMeters,
     required this.isInsideTanza,
     required this.outsideScopeFlag,
@@ -47,14 +54,20 @@ class EmergencyModel {
     final loc = json['currentLocation'] as Map<String, dynamic>?
              ?? json['location'] as Map<String, dynamic>?;
     final coords = loc?['coordinates'] as List?;
+    // A hardware panic-button incident can arrive with no coordinates at all: the
+    // alert is sent on the button press and the GNSS receiver is still searching.
+    final hasFix = coords != null && coords.length >= 2;
     return EmergencyModel(
       id: json['_id'] as String? ?? json['id'] as String? ?? json['emergencyId'] as String? ?? '',
       type: json['type'] as String? ?? '',
       source: json['source'] as String? ?? 'mobile_app',
       priority: json['priority'] as String? ?? 'medium',
       status: json['status'] as String? ?? 'pending',
-      lat: coords != null && coords.length >= 2 ? (coords[1] as num).toDouble() : 14.355,
-      lng: coords != null && coords.isNotEmpty ? (coords[0] as num).toDouble() : 120.885,
+      lat: hasFix ? (coords[1] as num).toDouble() : 14.355,
+      lng: hasFix ? (coords[0] as num).toDouble() : 120.885,
+      hasFix: hasFix,
+      locationStatus:
+          json['locationStatus'] as String? ?? (hasFix ? 'fixed' : 'pending'),
       accuracyMeters: (loc?['accuracyMeters'] as num?)?.toDouble(),
       isInsideTanza: json['isInsideTanza'] as bool? ?? true,
       outsideScopeFlag: json['outsideScopeFlag'] as bool? ?? false,
@@ -75,7 +88,8 @@ class EmergencyModel {
 
   bool get isActive => !['resolved', 'cancelled'].contains(status);
   bool get isCritical => priority == 'critical';
-  bool get isIoT => source == 'iot_keychain';
+  bool get isIoT => source == 'iot_keychain' || source == 'iot_device';
+  bool get isPanicButton => source == 'iot_device';
 
   String get displayType => switch (type) {
     'medical' => 'Medical',

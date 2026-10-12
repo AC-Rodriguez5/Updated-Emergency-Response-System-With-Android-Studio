@@ -15,6 +15,13 @@ function buildPayload(emergency) {
         outsideScopeFlag: emergency.outsideScopeFlag,
         barangay: emergency.barangay,
         location: emergency.currentLocation,
+        // Incidents stored before these fields existed read back undefined, because
+        // Mongoose applies defaults on write and not on hydration. Derive them so no
+        // consumer has to special-case a legacy document.
+        locationStatus: emergency.locationStatus ?? (emergency.currentLocation ? 'fixed' : 'pending'),
+        locationRevision: emergency.locationRevision ?? 0,
+        trackingActive: emergency.trackingActive ?? false,
+        sourceDeviceId: emergency.sourceDeviceId,
         userSnapshot: emergency.userSnapshot,
         occurredAt: new Date().toISOString(),
     };

@@ -54,6 +54,9 @@ export async function createEmergency(input, auth, ctx) {
             accuracyMeters: input.location.accuracyMeters,
             capturedAt: new Date(input.location.capturedAt),
         },
+        locationStatus: 'fixed',
+        locationRevision: 1,
+        lastLocationAt: new Date(),
         isInsideTanza: scope.isInsideTanza,
         outsideScopeFlag: scope.outsideScopeFlag,
         barangay: input.barangay,
@@ -125,10 +128,12 @@ export async function listActive(args, auth) {
         if (!responder)
             throw new AppError('Responder not found', 404, 'NOT_FOUND');
         const allowedTypes = emergencyTypesForResponder(responder);
-        filter.$or = [
-            { assignedResponderId: new mongoose.Types.ObjectId(auth.accountId) },
-            { type: { $in: allowedTypes } },
-        ];
+        if (allowedTypes.length > 0) {
+            filter.$or = [
+                { assignedResponderId: new mongoose.Types.ObjectId(auth.accountId) },
+                { type: { $in: allowedTypes } },
+            ];
+        }
     }
     const skip = (args.page - 1) * args.limit;
     const [items, total] = await Promise.all([
@@ -192,6 +197,9 @@ export async function cancel(id, body, auth, ctx) {
     }
     doc.status = 'cancelled';
     doc.cancelledAt = new Date();
+    // Closing the incident is what stops a hardware panic button transmitting: it
+    // reads this back on its next position post and then goes quiet.
+    doc.trackingActive = false;
     doc.timeline.push({
         event: 'cancelled',
         at: new Date(),
@@ -408,6 +416,9 @@ export async function resolve(id, body, auth, ctx) {
     doc.status = 'resolved';
     doc.resolvedAt = new Date();
     doc.resolvedBy = new mongoose.Types.ObjectId(auth.accountId);
+    // Stops a hardware panic button's position stream — it learns this from the
+    // reply to its next post.
+    doc.trackingActive = false;
     doc.timeline.push({
         event: 'resolved',
         at: new Date(),

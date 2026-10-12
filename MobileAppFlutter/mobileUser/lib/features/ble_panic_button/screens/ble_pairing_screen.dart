@@ -40,7 +40,7 @@ class BlePairingScreen extends ConsumerWidget {
               const SizedBox(height: 8),
               const Text(
                 '1. Power the ESP32 and modem from their correct supplies.\n'
-                '2. Hold the emergency button for 8 seconds. If a finger is already enrolled, scan it first.\n'
+                '2. Hold the emergency button for 3 seconds. If a finger is already enrolled, scan it first.\n'
                 '3. Keep the device near this phone and scan within 2 minutes.',
                 style: TextStyle(
                   fontSize: 14,
@@ -95,11 +95,16 @@ class BlePairingScreen extends ConsumerWidget {
               ),
               _ReadinessRow(
                 icon: Icons.cell_tower,
-                label: 'Direct LTE backup',
-                value: ble.directCellularEnabled
-                    ? 'Enabled'
-                    : 'Disabled until HTTPS/TLS is validated',
-                ready: ble.directCellularEnabled,
+                label: 'Direct cellular delivery',
+                value: !ble.directCellularEnabled
+                    ? 'Off — this build has no HTTPS API URL or APN'
+                    : ble.serverCertVerified
+                    ? 'On, server certificate verified'
+                    : 'On, but the server certificate is NOT verified',
+                // Deliberately not "ready" when the certificate is unverified:
+                // delivery works, but the device token rides on a session that a
+                // man-in-the-middle could read, and that should not look green.
+                ready: ble.directCellularEnabled && ble.serverCertVerified,
               ),
               const SizedBox(height: 20),
               if (!ble.fingerprintEnrolled)
@@ -278,7 +283,7 @@ class _EmergencyInstructions extends StatelessWidget {
         ),
         SizedBox(height: 8),
         Text(
-          'Scan the enrolled finger. The LED blinks three times when verified. Then hold the emergency button for 2 seconds. The device waits for a real GNSS fix before it sends a General SOS.',
+          'Scan the enrolled finger. The LED blinks three times when verified. Then tap the emergency button within 30 seconds. The SOS is sent immediately and the device keeps streaming GPS until dispatch resolves the incident.',
           style: TextStyle(
             fontSize: 13,
             color: AppColors.textMuted,

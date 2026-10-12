@@ -24,6 +24,9 @@ class BleDeviceState {
   final bool pairingWindow;
   final bool provisioned;
   final bool directCellularEnabled;
+  /// True when the wearable has a CA on its modem and therefore authenticates
+  /// the backend's certificate. False means encrypted but unverified.
+  final bool serverCertVerified;
   final String enrollmentStatus;
   final String? message;
 
@@ -40,6 +43,7 @@ class BleDeviceState {
     this.pairingWindow = false,
     this.provisioned = false,
     this.directCellularEnabled = false,
+    this.serverCertVerified = false,
     this.enrollmentStatus = 'not_started',
     this.message,
   });
@@ -63,6 +67,7 @@ class BleDeviceState {
     bool? pairingWindow,
     bool? provisioned,
     bool? directCellularEnabled,
+    bool? serverCertVerified,
     String? enrollmentStatus,
     String? message,
     bool clearMessage = false,
@@ -79,18 +84,57 @@ class BleDeviceState {
     pairingWindow: pairingWindow ?? this.pairingWindow,
     provisioned: provisioned ?? this.provisioned,
     directCellularEnabled: directCellularEnabled ?? this.directCellularEnabled,
+    serverCertVerified: serverCertVerified ?? this.serverCertVerified,
     enrollmentStatus: enrollmentStatus ?? this.enrollmentStatus,
     message: clearMessage ? null : message ?? this.message,
   );
 }
 
+/// Delivers a panic-button alert. Returns the server-side incident when one was
+/// created, or null when the alert must stay queued on the wearable.
 typedef BleEventCallback =
-    Future<bool> Function(Map<String, dynamic> emergencyPayload);
+    Future<BleDelivery> Function(Map<String, dynamic> emergencyPayload);
+
+/// Relays one streamed GNSS fix. Returns null when delivery failed.
+typedef BleLocationCallback =
+    Future<BleDelivery?> Function(Map<String, dynamic> locationPayload);
+
+/// What the phone learned from the backend about one delivery, in the shape the
+/// wearable's config characteristic understands.
+class BleDelivery {
+  final bool accepted;
+  final String? emergencyId;
+  final int? revision;
+
+  /// Whether the wearable should keep streaming its position. Defaults to true so
+  /// that a missing or malformed reply never silences a live alert.
+  final bool tracking;
+
+  const BleDelivery({
+    required this.accepted,
+    this.emergencyId,
+    this.revision,
+    this.tracking = true,
+  });
+
+  static const rejected = BleDelivery(accepted: false);
+}
+
+/// The two frame kinds the wearable notifies on its event characteristic.
+enum _FrameKind { sos, location }
+
+class _HardwareFrame {
+  final _FrameKind kind;
+  final String eventId;
+  final Map<String, dynamic> payload;
+  const _HardwareFrame(this.kind, this.eventId, this.payload);
+}
 
 class BleService extends StateNotifier<BleDeviceState> {
   final Dio _dio;
   final Box<String> _offlineQueue;
   BleEventCallback? onEmergency;
+  BleLocationCallback? onDeviceLocation;
 
   final _processedEventIds = <String>{};
   final _processingEventIds = <String>{};
@@ -167,8 +211,8 @@ class BleService extends StateNotifier<BleDeviceState> {
         final enrolled = identity['fingerprintEnrolled'] == true;
         throw StateError(
           enrolled
-              ? 'Scan the enrolled finger, then hold the emergency button for 8 seconds.'
-              : 'Hold the emergency button for 8 seconds, then scan again.',
+              ? 'Scan the enrolled finger, then hold the emergency button for 3 seconds.'
+              : 'Hold the emergency button for 3 seconds, then scan again.',
         );
       }
 
@@ -179,6 +223,7 @@ class BleService extends StateNotifier<BleDeviceState> {
           'bleServiceUuid': AppConfig.serviceUuid,
           'firmwareVersion': identity['firmwareVersion'],
           'fingerprintEnrolled': identity['fingerprintEnrolled'] == true,
+          'directCellularEnabled': AppConfig.directCellularReady,
         },
       );
       final paired = response.data?['data'] as Map<String, dynamic>?;
@@ -194,6 +239,9 @@ class BleService extends StateNotifier<BleDeviceState> {
             'apiBase': AppConfig.apiBaseUrl,
             'apn': AppConfig.cellularApn,
             'cellularEnabled': AppConfig.directCellularReady,
+            // The CA's filename on the modem, not its bytes. Empty means the
+            // wearable cannot verify the backend's certificate.
+            'caFile': AppConfig.modemCaFile,
           }),
         ),
         withoutResponse: false,
@@ -206,7 +254,7 @@ class BleService extends StateNotifier<BleDeviceState> {
         );
       }
       await _dio.patch(
-        '/user/ble-devices/${paired['_id']}',
+        '/user/ble-devices/${paired['_id']}/status',
         data: {
           'fingerprintEnrolled': provisioned['fingerprintEnrolled'] == true,
           'directCellularEnabled': provisioned['directCellularEnabled'] == true,
@@ -228,6 +276,7 @@ class BleService extends StateNotifier<BleDeviceState> {
         pairingWindow: provisioned['pairingWindow'] == true,
         provisioned: true,
         directCellularEnabled: provisioned['directCellularEnabled'] == true,
+        serverCertVerified: provisioned['serverCertVerified'] == true,
         enrollmentStatus:
             provisioned['enrollmentStatus']?.toString() ?? 'ready',
         clearMessage: true,
@@ -299,97 +348,147 @@ class BleService extends StateNotifier<BleDeviceState> {
     }
   }
 
-  Map<String, dynamic>? _decodeHardwareEvent(List<int> bytes) {
+  /// Reads one BLE frame into an API payload.
+  ///
+  /// A notification carries at most MTU-3 bytes, so the wearable sends a compact
+  /// form with single-letter keys. `k` names the frame kind; frames from older
+  /// firmware have no `k` and are treated as alerts.
+  ///
+  /// A GNSS block is optional on an alert frame and required on a location frame.
+  /// That asymmetry is the whole point of the design: the alert leaves the moment
+  /// the button is released, and the fixes follow as the receiver finds them.
+  _HardwareFrame? _decodeHardwareFrame(List<int> bytes) {
     final event = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
     final deviceId = event['deviceId'] ?? event['d'];
     final eventId = event['eventId'] ?? event['e'];
+    if (deviceId != state.deviceId || eventId is! String) return null;
+
+    final kind = (event['kind'] ?? event['k']) == 'loc'
+        ? _FrameKind.location
+        : _FrameKind.sos;
+    final location = _decodeLocation(event);
+
+    if (kind == _FrameKind.location) {
+      if (location == null) return null;
+      return _HardwareFrame(kind, eventId, {
+        'deviceId': deviceId,
+        'eventId': eventId,
+        'transport': 'ble',
+        'location': location,
+        ..._decodeGnssQuality(event),
+        if (state.firmwareVersion != null)
+          'firmwareVersion': state.firmwareVersion,
+      });
+    }
+
     final emergencyType = event['buttonType'] ?? event['type'] ?? event['t'];
     final fingerprintVerified =
         event['fingerprintVerified'] == true ||
         event['authMethod'] == 'fingerprint' ||
         event['f'] == true;
-    final nested = event['location'];
-    final location = nested is Map<String, dynamic>
-        ? nested
-        : <String, dynamic>{
-            'type': 'Point',
-            'coordinates': [event['lo'], event['la']],
-            'accuracyMeters': event['a'],
-            'capturedAt': event['at'],
-          };
-    final coordinates = location['coordinates'];
-    final capturedAt = location['capturedAt'];
-    if (deviceId != state.deviceId ||
-        eventId is! String ||
-        emergencyType != 'general_sos' ||
-        !fingerprintVerified ||
-        coordinates is! List ||
-        coordinates.length != 2 ||
-        coordinates[0] is! num ||
-        coordinates[1] is! num ||
-        location['accuracyMeters'] is! num ||
-        capturedAt is! String ||
-        DateTime.tryParse(capturedAt) == null) {
-      return null;
-    }
-    return {
+    // An unauthenticated or mistyped alert is dropped: only a fingerprint-verified
+    // general SOS from the paired wearable may raise an incident.
+    if (emergencyType != 'general_sos' || !fingerprintVerified) return null;
+
+    return _HardwareFrame(kind, eventId, {
       'deviceId': deviceId,
       'eventId': eventId,
       'buttonType': 'general_sos',
       'fingerprintVerified': true,
       'authMethod': 'fingerprint',
       'transport': 'ble',
+      // Omitted rather than sent as null: the API treats the field as optional but
+      // rejects an explicit null.
       'firmwareVersion':
-          event['firmwareVersion'] ?? event['v'] ?? state.firmwareVersion,
+          ?(event['firmwareVersion'] ?? event['v'] ?? state.firmwareVersion),
       if ((event['batteryLevel'] ?? event['b']) is num)
         'deviceBatteryAtTrigger': event['batteryLevel'] ?? event['b'],
-      if ((event['gnssHdop'] ?? event['h']) is num)
-        'gnssHdop': event['gnssHdop'] ?? event['h'],
-      if ((event['gnssSatellites'] ?? event['s']) is int)
-        'gnssSatellites': event['gnssSatellites'] ?? event['s'],
-      'deviceTimestamp': capturedAt,
-      'location': {
-        'type': 'Point',
-        'coordinates': [
-          (coordinates[0] as num).toDouble(),
-          (coordinates[1] as num).toDouble(),
-        ],
-        'accuracyMeters': (location['accuracyMeters'] as num).toDouble(),
-        'capturedAt': capturedAt,
-      },
+      ..._decodeGnssQuality(event),
+      if (location != null) 'deviceTimestamp': location['capturedAt'],
+      'location': ?location,
+    });
+  }
+
+  /// Returns the GeoJSON block for a frame, or null when the wearable has no fix
+  /// yet. A partially filled block is treated as no fix at all rather than being
+  /// patched up with defaults.
+  Map<String, dynamic>? _decodeLocation(Map<String, dynamic> event) {
+    final nested = event['location'];
+    final raw = nested is Map<String, dynamic>
+        ? nested
+        : <String, dynamic>{
+            'coordinates': [event['lo'], event['la']],
+            'accuracyMeters': event['a'],
+            'capturedAt': event['at'],
+          };
+    final coordinates = raw['coordinates'];
+    final accuracy = raw['accuracyMeters'];
+    final capturedAt = raw['capturedAt'];
+    if (coordinates is! List ||
+        coordinates.length != 2 ||
+        coordinates[0] is! num ||
+        coordinates[1] is! num ||
+        accuracy is! num ||
+        capturedAt is! String ||
+        DateTime.tryParse(capturedAt) == null) {
+      return null;
+    }
+    return {
+      'type': 'Point',
+      'coordinates': [
+        (coordinates[0] as num).toDouble(),
+        (coordinates[1] as num).toDouble(),
+      ],
+      'accuracyMeters': accuracy.toDouble(),
+      'capturedAt': capturedAt,
+    };
+  }
+
+  Map<String, dynamic> _decodeGnssQuality(Map<String, dynamic> event) {
+    final hdop = event['gnssHdop'] ?? event['h'];
+    final satellites = event['gnssSatellites'] ?? event['s'];
+    return {
+      if (hdop is num) 'gnssHdop': hdop,
+      if (satellites is int) 'gnssSatellites': satellites,
     };
   }
 
   Future<void> _handleHardwareEvent(List<int> bytes) async {
     String? processingEventId;
     try {
-      final payload = _decodeHardwareEvent(bytes);
-      if (payload == null) {
+      final frame = _decodeHardwareFrame(bytes);
+      if (frame == null) {
         state = state.copyWith(
           message: 'Ignored an invalid or unauthenticated hardware event.',
         );
         return;
       }
-      final eventId = payload['eventId'] as String;
+      if (frame.kind == _FrameKind.location) {
+        await _relayLocation(frame);
+        return;
+      }
+      final eventId = frame.eventId;
       if (_processedEventIds.contains(eventId)) {
         await _acknowledge(eventId);
         return;
       }
       if (!_processingEventIds.add(eventId)) return;
       processingEventId = eventId;
-      final key = 'hardware:${payload['deviceId']}:$eventId';
-      await _offlineQueue.put(key, jsonEncode(payload));
-      final accepted = await onEmergency?.call(payload) ?? false;
-      if (accepted) {
+      final key = 'hardware:${frame.payload['deviceId']}:$eventId';
+      await _offlineQueue.put(key, jsonEncode(frame.payload));
+      final delivery = await onEmergency?.call(frame.payload);
+      if (delivery?.accepted ?? false) {
         await _offlineQueue.delete(key);
         _processedEventIds.add(eventId);
         if (_processedEventIds.length > 1000) {
           _processedEventIds.remove(_processedEventIds.first);
         }
-        await _acknowledge(eventId);
+        await _acknowledge(eventId, delivery: delivery);
         state = state.copyWith(
           lastSeen: DateTime.now(),
-          message: 'Fingerprint-authorized SOS was saved for delivery.',
+          message: frame.payload['location'] == null
+              ? 'Fingerprint-authorized SOS sent. Waiting for the first GPS fix.'
+              : 'Fingerprint-authorized SOS was saved for delivery.',
         );
       }
     } catch (error) {
@@ -401,6 +500,23 @@ class BleService extends StateNotifier<BleDeviceState> {
     }
   }
 
+  /// Forwards one streamed fix.
+  ///
+  /// Nothing is queued for retry here: a stale position is worth less than the
+  /// next one, which is seconds away, and the wearable holds its own copy until
+  /// the incident closes.
+  Future<void> _relayLocation(_HardwareFrame frame) async {
+    final delivery = await onDeviceLocation?.call(frame.payload);
+    if (delivery == null) return;
+    await _acknowledge(frame.eventId, delivery: delivery);
+    state = state.copyWith(
+      lastSeen: DateTime.now(),
+      message: delivery.tracking
+          ? 'Location sent to dispatch (revision ${delivery.revision ?? 0}).'
+          : 'Incident closed. The device was told to stop tracking.',
+    );
+  }
+
   Future<void> retryQueuedEvents() async {
     final callback = onEmergency;
     if (callback == null) return;
@@ -410,9 +526,10 @@ class BleService extends StateNotifier<BleDeviceState> {
       try {
         final payload = jsonDecode(raw) as Map<String, dynamic>;
         if (payload['deviceId'] != state.deviceId) continue;
-        if (await callback(payload)) {
+        final delivery = await callback(payload);
+        if (delivery.accepted) {
           await _offlineQueue.delete(key);
-          await _acknowledge(payload['eventId'] as String);
+          await _acknowledge(payload['eventId'] as String, delivery: delivery);
         }
       } catch (_) {
         return;
@@ -420,9 +537,23 @@ class BleService extends StateNotifier<BleDeviceState> {
     }
   }
 
-  Future<void> _acknowledge(String eventId) async {
+  /// Confirms one event back to the wearable.
+  ///
+  /// `revision` is what the firmware prints as `Server confirmed ... revision ...`.
+  /// `tracking` is what ends its GPS stream, and is only ever sent on an explicit
+  /// server answer — a dropped reply has to leave the device transmitting rather
+  /// than silence it on a live incident.
+  Future<void> _acknowledge(String eventId, {BleDelivery? delivery}) async {
     await _configCharacteristic?.write(
-      utf8.encode(jsonEncode({'ackEventId': eventId})),
+      utf8.encode(
+        jsonEncode({
+          'ackEventId': eventId,
+          if (delivery?.emergencyId != null)
+            'emergencyId': delivery!.emergencyId,
+          if (delivery?.revision != null) 'revision': delivery!.revision,
+          if (delivery != null) 'tracking': delivery.tracking,
+        }),
+      ),
       withoutResponse: false,
     );
   }
@@ -437,8 +568,8 @@ class BleService extends StateNotifier<BleDeviceState> {
     if (identity['pairingWindow'] != true) {
       throw StateError(
         identity['fingerprintEnrolled'] == true
-            ? 'Scan the enrolled finger, then hold the emergency button for 8 seconds.'
-            : 'Hold the emergency button for 8 seconds before enrollment.',
+            ? 'Scan the enrolled finger, then hold the emergency button for 3 seconds.'
+            : 'Hold the emergency button for 3 seconds before enrollment.',
       );
     }
     state = state.copyWith(enrollmentStatus: 'starting', clearMessage: true);

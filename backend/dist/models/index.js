@@ -2,7 +2,7 @@ export { User } from './User.js';
 export { Responder, } from './Responder.js';
 export { Alert } from './Alert.js';
 export { Contact } from './Contact.js';
-export { Emergency } from './Emergency.js';
+export { Emergency, } from './Emergency.js';
 export { LocationSample } from './LocationSample.js';
 export { BleDevice } from './BleDevice.js';
 export { AmbulanceUnit } from './AmbulanceUnit.js';

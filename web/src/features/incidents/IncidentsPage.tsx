@@ -2,12 +2,17 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, MapPin, CheckCircle, FileText, MessageSquare } from 'lucide-react';
 import { AdminShell } from '@/components/layout/AdminShell';
-import { StatusBadge, TypeBadge, PriorityBadge } from '@/components/ui/Badge';
+import {
+  StatusBadge,
+  TypeBadge,
+  PriorityBadge,
+  LocationStatusBadge,
+} from '@/components/ui/Badge';
 import { TableSkeleton } from '@/components/ui/Skeleton';
 import { Modal } from '@/components/ui/Modal';
 import { api } from '@/services/apiClient';
 import { getSocket } from '@/services/socketClient';
-import { fmt } from '@/lib/utils';
+import { fmt, isHardwareSource, locationLabel, sourceLabel } from '@/lib/utils';
 import type { Emergency, Paginated } from '@/types';
 
 const FILTERS = ['all', 'critical', 'medical', 'fire', 'crime', 'general_sos'] as const;
@@ -45,6 +50,10 @@ export default function IncidentsPage() {
     socket.on('emergency.update_requested', handler);
     socket.on('emergency.resolved', handler);
     socket.on('emergency.iot_keychain_created', handler);
+    socket.on('emergency.iot_device_created', handler);
+    // A panic button streams fixes for the whole life of its incident; each one
+    // can turn "Waiting for GPS" into a real position in this table.
+    socket.on('emergency.location_updated', handler);
     return () => {
       socket.off('emergency.created', handler);
       socket.off('emergency.updated', handler);
@@ -52,6 +61,8 @@ export default function IncidentsPage() {
       socket.off('emergency.update_requested', handler);
       socket.off('emergency.resolved', handler);
       socket.off('emergency.iot_keychain_created', handler);
+      socket.off('emergency.iot_device_created', handler);
+      socket.off('emergency.location_updated', handler);
     };
   }, [refetch]);
 
@@ -137,22 +148,32 @@ export default function IncidentsPage() {
                       </td>
                       <td className="px-6 py-4"><PriorityBadge priority={em.priority} /></td>
                       <td className="px-6 py-4 text-slate-500 text-xs">
-                        {em.source === 'iot_keychain' ? (
-                          <span className="text-blue-600 font-semibold">IoT Keychain</span>
+                        {isHardwareSource(em.source) ? (
+                          <span className="text-blue-600 font-semibold">{sourceLabel(em.source)}</span>
                         ) : (
-                          'Mobile App'
+                          sourceLabel(em.source)
                         )}
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex items-center gap-1.5 text-slate-600">
-                          <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
-                          <span className="text-xs">
-                            {em.barangay ?? `${em.currentLocation.coordinates[1].toFixed(4)}, ${em.currentLocation.coordinates[0].toFixed(4)}`}
-                          </span>
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-1.5 text-slate-600">
+                            <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span className="text-xs">{locationLabel(em)}</span>
+                          </div>
+                          <LocationStatusBadge
+                            locationStatus={em.locationStatus}
+                            trackingActive={em.trackingActive}
+                          />
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        {em.outsideScopeFlag ? (
+                        {em.locationStatus === 'pending' ? (
+                          // Scope cannot be judged without coordinates, and claiming
+                          // "Tanza" here would be a guess a dispatcher may act on.
+                          <span className="inline-flex items-center gap-1 text-slate-400 text-xs font-bold">
+                            <AlertTriangle className="w-3.5 h-3.5" /> Unknown
+                          </span>
+                        ) : em.outsideScopeFlag ? (
                           <span className="inline-flex items-center gap-1 text-amber-600 text-xs font-bold">
                             <AlertTriangle className="w-3.5 h-3.5" /> Outside
                           </span>
@@ -197,12 +218,31 @@ export default function IncidentsPage() {
                 <TypeBadge type={reviewIncident.type} source={reviewIncident.source} />
                 <PriorityBadge priority={reviewIncident.priority} />
                 <StatusBadge status={reviewIncident.status} />
+                <LocationStatusBadge
+                  locationStatus={reviewIncident.locationStatus}
+                  trackingActive={reviewIncident.trackingActive}
+                />
               </div>
               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                 <ReviewRow label="Sender" value={reviewIncident.userSnapshot?.fullName} />
-                <ReviewRow label="Location" value={reviewIncident.barangay ?? 'Tanza'} />
+                <ReviewRow label="Location" value={locationLabel(reviewIncident)} />
+                <ReviewRow label="Source" value={sourceLabel(reviewIncident.source)} />
                 <ReviewRow label="Reported" value={fmt(reviewIncident.createdAt)} />
                 <ReviewRow label="Responder" value={reviewIncident.assignedResponderId ? 'Assigned' : 'Unassigned'} />
+                {reviewIncident.source === 'iot_device' && (
+                  <>
+                    <ReviewRow label="Device" value={reviewIncident.sourceDeviceId} />
+                    <ReviewRow
+                      label="Authorized by"
+                      value={
+                        reviewIncident.hardwareAuthMethod === 'fingerprint'
+                          ? 'Fingerprint + button press'
+                          : undefined
+                      }
+                    />
+                    <ReviewRow label="Last GPS fix" value={fmt(reviewIncident.lastLocationAt)} />
+                  </>
+                )}
               </dl>
             </div>
 

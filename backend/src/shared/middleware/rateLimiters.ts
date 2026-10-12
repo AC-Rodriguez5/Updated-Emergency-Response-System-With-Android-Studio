@@ -43,6 +43,17 @@ export const emergencyCreateLimiter = rateLimit({
   keyGenerator: (req) => authedKey(req, 'emergency'),
 });
 
+// The panic button streams a fix roughly every 10 s for as long as its incident
+// stays open, and retries after a dropped cellular connection arrive in bursts.
+// This gets its own key salt so a long GPS stream can never exhaust the budget
+// the same account needs to raise a fresh alert.
+export const deviceLocationLimiter = rateLimit({
+  ...baseOptions,
+  windowMs: 60 * 1000,
+  limit: 60,
+  keyGenerator: (req) => authedKey(req, 'device-location'),
+});
+
 export const ambulanceRequestLimiter = rateLimit({
   ...baseOptions,
   windowMs: 60 * 1000,

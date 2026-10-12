@@ -57,6 +57,28 @@ class EmergencyRepository {
     }
   }
 
+  /// Relays one GNSS fix the wearable pushed over Bluetooth.
+  ///
+  /// Returns the incident as the server now holds it. The caller cares about
+  /// [EmergencyModel.trackingActive]: once it is false the wearable is told to
+  /// stop transmitting, which is how a resolved incident ends the stream.
+  Future<EmergencyModel> sendIotLocation({
+    required Map<String, dynamic> payload,
+  }) async {
+    try {
+      final response = await _dio.post(
+        '/emergencies/from-iot/location',
+        data: payload,
+      );
+      final data =
+          (response.data as Map<String, dynamic>)['data']
+              as Map<String, dynamic>;
+      return EmergencyModel.fromJson(data);
+    } on DioException catch (e) {
+      throw dioErrorToApiException(e);
+    }
+  }
+
   Future<EmergencyModel> getEmergency(String id) async {
     try {
       final response = await _dio.get('/emergencies/$id');

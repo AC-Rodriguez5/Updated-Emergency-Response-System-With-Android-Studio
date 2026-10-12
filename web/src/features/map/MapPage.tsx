@@ -3,21 +3,34 @@ import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { X, AlertTriangle, Wifi, ShieldCheck, RadioTower } from 'lucide-react';
+import {
+  X,
+  AlertTriangle,
+  Wifi,
+  ShieldCheck,
+  RadioTower,
+  Fingerprint,
+  Satellite,
+} from 'lucide-react';
 import { AdminShell } from '@/components/layout/AdminShell';
-import { TypeBadge, PriorityBadge, StatusBadge } from '@/components/ui/Badge';
+import {
+  TypeBadge,
+  PriorityBadge,
+  StatusBadge,
+  LocationStatusBadge,
+} from '@/components/ui/Badge';
 import { AuthedImage } from '@/components/ui/AuthedImage';
 import { api } from '@/services/apiClient';
 import { getSocket } from '@/services/socketClient';
 import { useNotifications } from '@/features/notifications/NotificationProvider';
-import { fmt } from '@/lib/utils';
+import { fmt, hasCoordinates, locationLabel, sourceLabel } from '@/lib/utils';
 import { TANZA_CENTER, TANZA_ZOOM } from '@/styles/tokens';
 import type { Emergency, Paginated, ResponderLiveLocation } from '@/types';
 
-function makeIcon(color: string, iot = false) {
+function makeIcon(color: string, badge?: string) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="42" viewBox="0 0 32 42">
     <path fill="${color}" stroke="white" stroke-width="2" d="M16 2C9.4 2 4 7.4 4 14c0 9 12 26 12 26s12-17 12-26C28 7.4 22.6 2 16 2z"/>
-    ${iot ? `<text x="16" y="18" text-anchor="middle" fill="white" font-size="9" font-weight="bold">IoT</text>` : `<circle cx="16" cy="14" r="5" fill="white"/>`}
+    ${badge ? `<text x="16" y="18" text-anchor="middle" fill="white" font-size="9" font-weight="bold">${badge}</text>` : `<circle cx="16" cy="14" r="5" fill="white"/>`}
   </svg>`;
   return L.divIcon({
     html: svg,
@@ -33,8 +46,15 @@ const ICONS: Record<string, L.DivIcon> = {
   crime: makeIcon('#7C3AED'),
   fire: makeIcon('#EA580C'),
   general_sos: makeIcon('#0F172A'),
-  iot: makeIcon('#DC2626', true),
+  iot: makeIcon('#DC2626', 'IoT'),
+  device: makeIcon('#B91C1C', 'SOS'),
 };
+
+function emergencyIcon(emergency: Emergency): L.DivIcon {
+  if (emergency.source === 'iot_device') return ICONS.device!;
+  if (emergency.source === 'iot_keychain') return ICONS.iot!;
+  return ICONS[emergency.type] ?? ICONS.general_sos!;
+}
 
 const LIVE_RESPONDER_STATUSES = new Set(['on_duty', 'available', 'busy', 'responding']);
 
@@ -61,11 +81,17 @@ function responderIcon(status?: string) {
 function FitBounds({ emergencies }: { emergencies: Emergency[] }) {
   const map = useMap();
   useEffect(() => {
-    if (emergencies.length === 0) return;
-    const bounds = L.latLngBounds(
-      emergencies.map((em) => [em.currentLocation.coordinates[1], em.currentLocation.coordinates[0]] as [number, number]),
-    );
-    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+    const points = emergencies
+      .filter(hasCoordinates)
+      .map(
+        (em) =>
+          [em.currentLocation!.coordinates[1], em.currentLocation!.coordinates[0]] as [
+            number,
+            number,
+          ],
+      );
+    if (points.length === 0) return;
+    map.fitBounds(L.latLngBounds(points), { padding: [40, 40], maxZoom: 15 });
   }, [emergencies, map]);
   return <></>;
 }
@@ -73,9 +99,9 @@ function FitBounds({ emergencies }: { emergencies: Emergency[] }) {
 function FocusEmergency({ emergency }: { emergency: Emergency | null }) {
   const map = useMap();
   useEffect(() => {
-    if (!emergency) return;
+    if (!emergency || !hasCoordinates(emergency)) return;
     map.setView(
-      [emergency.currentLocation.coordinates[1], emergency.currentLocation.coordinates[0]],
+      [emergency.currentLocation!.coordinates[1], emergency.currentLocation!.coordinates[0]],
       15,
     );
   }, [emergency, map]);
@@ -140,6 +166,9 @@ export default function MapPage() {
           if (idx >= 0) { const next = [...prev]; next[idx] = data.data; return next; }
           return [data.data, ...prev];
         });
+        // The open detail panel holds its own copy, so a streamed GPS fix has to be
+        // pushed into it too or the dispatcher keeps reading a stale position.
+        setSelected((s) => (s?._id === data.data._id ? data.data : s));
       } catch {}
     };
 
@@ -150,6 +179,8 @@ export default function MapPage() {
 
     socket.on('emergency.created', upsert);
     socket.on('emergency.iot_keychain_created', upsert);
+    socket.on('emergency.iot_device_created', upsert);
+    socket.on('emergency.location_updated', upsert);
     socket.on('emergency.updated', upsert);
     socket.on('emergency.assigned', upsert);
     socket.on('emergency.resolved', remove);
@@ -157,6 +188,8 @@ export default function MapPage() {
     return () => {
       socket.off('emergency.created', upsert);
       socket.off('emergency.iot_keychain_created', upsert);
+      socket.off('emergency.iot_device_created', upsert);
+      socket.off('emergency.location_updated', upsert);
       socket.off('emergency.updated', upsert);
       socket.off('emergency.assigned', upsert);
       socket.off('emergency.resolved', remove);
@@ -218,10 +251,38 @@ export default function MapPage() {
     };
   }, []);
 
+  // Incidents the map cannot plot yet. Without this strip a fingerprint-authorized
+  // panic-button alert would be invisible here for as long as its receiver needs.
+  const locating = emergencies.filter((em) => !hasCoordinates(em));
+
   return (
     <AdminShell title="Map Center">
       <div className="flex gap-4 -mt-2">
-        <div className="flex-1 bg-white rounded-2xl border border-slate-200 overflow-hidden" style={{ height: 'calc(100vh - 160px)' }}>
+        <div className="flex flex-1 flex-col gap-3 min-w-0" style={{ height: 'calc(100vh - 160px)' }}>
+        {locating.length > 0 && (
+          <div className="flex-shrink-0 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3">
+            <h2 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-amber-800">
+              <Satellite className="h-3.5 w-3.5" />
+              Locating ({locating.length}) — alert received, no position yet
+            </h2>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {locating.map((em) => (
+                <button
+                  key={em._id}
+                  onClick={() => {
+                    setSelected(em);
+                    stopEmergencyAlert(em._id);
+                  }}
+                  className="rounded-xl border border-amber-300 bg-white px-3 py-1.5 text-left text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                >
+                  {em.userSnapshot?.fullName ?? 'Unknown sender'}
+                  <span className="ml-2 font-normal text-amber-700">{fmt(em.createdAt)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="flex-1 min-h-0 bg-white rounded-2xl border border-slate-200 overflow-hidden">
           <MapContainer
             center={TANZA_CENTER}
             zoom={TANZA_ZOOM}
@@ -232,11 +293,14 @@ export default function MapPage() {
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           />
-          {emergencies.map((em) => (
+          {/* A panic-button incident has no marker until its first GNSS fix lands.
+              Those appear in the "Locating" strip below the map instead, so they are
+              never silently dropped off the dispatcher's screen. */}
+          {emergencies.filter(hasCoordinates).map((em) => (
             <Marker
               key={em._id}
-              position={[em.currentLocation.coordinates[1], em.currentLocation.coordinates[0]]}
-              icon={em.source === 'iot_keychain' ? ICONS.iot : (ICONS[em.type] ?? ICONS.general_sos)}
+              position={[em.currentLocation!.coordinates[1], em.currentLocation!.coordinates[0]]}
+              icon={emergencyIcon(em)}
               eventHandlers={{
                 click: () => {
                   setSelected(em);
@@ -247,6 +311,11 @@ export default function MapPage() {
               <Popup>
                 <div className="text-xs font-bold">{em.type.replace('_', ' ').toUpperCase()}</div>
                 <div className="text-xs text-gray-500">{em.barangay ?? 'Tanza'}</div>
+                {em.source === 'iot_device' && (
+                  <div className="text-xs font-semibold text-red-600">
+                    Panic button · rev {em.locationRevision}
+                  </div>
+                )}
               </Popup>
             </Marker>
           ))}
@@ -273,6 +342,7 @@ export default function MapPage() {
           <FocusEmergency emergency={selected} />
           </MapContainer>
         </div>
+        </div>
 
         {selected && (
           <div className="w-80 bg-white rounded-2xl border border-slate-200 overflow-y-auto flex-shrink-0" style={{ maxHeight: 'calc(100vh - 160px)' }}>
@@ -284,6 +354,12 @@ export default function MapPage() {
                     <AlertTriangle className="w-3.5 h-3.5" /> CRITICAL
                   </div>
                 )}
+                <div className="mt-1.5">
+                  <LocationStatusBadge
+                    locationStatus={selected.locationStatus}
+                    trackingActive={selected.trackingActive}
+                  />
+                </div>
               </div>
               <button onClick={() => setSelected(null)} className="p-1 rounded-lg hover:bg-slate-100 text-slate-400">
                 <X className="w-4 h-4" />
@@ -352,12 +428,24 @@ export default function MapPage() {
               <div className="space-y-2.5 bg-slate-50 rounded-xl p-4">
                 <h3 className="font-bold text-slate-700 text-xs uppercase tracking-wide">Current Location</h3>
                 <Detail label="Barangay" value={selected.barangay} />
-                <Detail
-                  label="Coordinates"
-                  value={`${selected.currentLocation.coordinates[1].toFixed(5)}, ${selected.currentLocation.coordinates[0].toFixed(5)}`}
-                />
-                {selected.currentLocation.accuracyMeters && (
-                  <Detail label="Accuracy" value={`±${selected.currentLocation.accuracyMeters.toFixed(0)}m`} />
+                {selected.currentLocation ? (
+                  <>
+                    <Detail
+                      label="Coordinates"
+                      value={`${selected.currentLocation.coordinates[1].toFixed(5)}, ${selected.currentLocation.coordinates[0].toFixed(5)}`}
+                    />
+                    {selected.currentLocation.accuracyMeters !== undefined && (
+                      <Detail label="Accuracy" value={`±${selected.currentLocation.accuracyMeters.toFixed(0)}m`} />
+                    )}
+                    <Detail label="Fix captured" value={fmt(selected.currentLocation.capturedAt)} />
+                    <Detail label="Updates received" value={`${selected.locationRevision}`} />
+                  </>
+                ) : (
+                  <p className="rounded-lg bg-amber-100 px-3 py-2 text-[11px] font-semibold leading-4 text-amber-800">
+                    Waiting for GPS. The alert and the sender's registered details are
+                    confirmed; the device is still searching for a satellite fix and will
+                    fill this in as soon as it has one.
+                  </p>
                 )}
               </div>
 
@@ -368,6 +456,44 @@ export default function MapPage() {
                   </h3>
                   <Detail label="Device ID" value={selected.sourceDeviceId} />
                   <Detail label="Event ID" value={selected.bleEventId} />
+                  {selected.deviceBatteryAtTrigger !== undefined && (
+                    <Detail label="Battery at trigger" value={`${selected.deviceBatteryAtTrigger}%`} />
+                  )}
+                </div>
+              )}
+
+              {selected.source === 'iot_device' && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-4 space-y-2.5">
+                  <h3 className="font-bold text-red-700 text-xs uppercase tracking-wide flex items-center gap-1.5">
+                    <Fingerprint className="w-3.5 h-3.5" /> Hardware Panic Button
+                  </h3>
+                  <Detail label="Device ID" value={selected.sourceDeviceId} />
+                  <Detail label="Event ID" value={selected.hardwareEventId ?? selected.bleEventId} />
+                  <Detail
+                    label="Authorized by"
+                    value={
+                      selected.hardwareAuthMethod === 'fingerprint'
+                        ? 'Enrolled fingerprint + button press'
+                        : undefined
+                    }
+                  />
+                  <Detail
+                    label="Delivered over"
+                    value={selected.deliveryTransports
+                      ?.map((t) => (t === 'lte' ? 'Cellular' : 'Phone (BLE)'))
+                      .join(' + ')}
+                  />
+                  <Detail
+                    label="GPS tracking"
+                    value={selected.trackingActive ? 'Streaming until resolved' : 'Stopped'}
+                  />
+                  <Detail label="Last fix at" value={fmt(selected.lastLocationAt)} />
+                  {selected.gnssSatellites !== undefined && (
+                    <Detail label="Satellites" value={`${selected.gnssSatellites}`} />
+                  )}
+                  {selected.gnssHdop !== undefined && (
+                    <Detail label="HDOP" value={selected.gnssHdop.toFixed(1)} />
+                  )}
                   {selected.deviceBatteryAtTrigger !== undefined && (
                     <Detail label="Battery at trigger" value={`${selected.deviceBatteryAtTrigger}%`} />
                   )}
@@ -402,7 +528,8 @@ export default function MapPage() {
                   className="w-full text-left px-5 py-3.5 hover:bg-slate-50 transition-colors"
                 >
                   <TypeBadge type={em.type} source={em.source} />
-                  <p className="text-xs text-slate-500 mt-1.5">{em.barangay ?? 'Tanza'} · {fmt(em.createdAt)}</p>
+                  <p className="text-xs text-slate-500 mt-1.5">{locationLabel(em)} · {fmt(em.createdAt)}</p>
+                  <p className="text-[11px] text-slate-400">{sourceLabel(em.source)}</p>
                 </button>
               ))}
             </div>
