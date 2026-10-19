@@ -17,7 +17,17 @@ class EmergencyModel {
   final String? barangay;
   final String? notes;
   final DateTime createdAt;
+  /// When a dispatcher closed it. Null while the incident is still open.
+  final DateTime? resolvedAt;
   final String? assignedResponderId;
+  /// When this responder confirmed they are taking it.
+  ///
+  /// Null on an assignment a dispatcher made that has not been answered yet —
+  /// accepting from the feed fills it in immediately, being dispatched does not.
+  final DateTime? assignmentAckAt;
+  /// Set by the backend once an incident has sat in the pending pool with nobody
+  /// accepting it.
+  final bool dispatchOverdue;
   final Map<String, dynamic>? userSnapshot;
   final String? bleEventId;
   final String? sourceDeviceId;
@@ -40,7 +50,10 @@ class EmergencyModel {
     this.barangay,
     this.notes,
     required this.createdAt,
+    this.resolvedAt,
     this.assignedResponderId,
+    this.assignmentAckAt,
+    this.dispatchOverdue = false,
     this.userSnapshot,
     this.bleEventId,
     this.sourceDeviceId,
@@ -74,7 +87,14 @@ class EmergencyModel {
       barangay: json['barangay'] as String?,
       notes: json['notes'] as String?,
       createdAt: json['createdAt'] != null ? DateTime.tryParse(json['createdAt'] as String) ?? DateTime.now() : DateTime.now(),
+      resolvedAt: json['resolvedAt'] != null
+          ? DateTime.tryParse(json['resolvedAt'] as String)
+          : null,
       assignedResponderId: json['assignedResponderId'] as String?,
+      assignmentAckAt: json['assignmentAckAt'] != null
+          ? DateTime.tryParse(json['assignmentAckAt'] as String)
+          : null,
+      dispatchOverdue: json['dispatchOverdue'] as bool? ?? false,
       userSnapshot: json['userSnapshot'] as Map<String, dynamic>?,
       bleEventId: json['bleEventId'] as String?,
       sourceDeviceId: json['sourceDeviceId'] as String?,
@@ -87,6 +107,30 @@ class EmergencyModel {
   }
 
   bool get isActive => !['resolved', 'cancelled'].contains(status);
+
+  /// Everything anybody has said about this incident, oldest first.
+  ///
+  /// Reports and update requests are in here with the messages on purpose: to
+  /// the people working the incident it is one conversation, however it was
+  /// filed.
+  List<EmergencyTimelineEvent> get conversation {
+    const spoken = {
+      'message',
+      'user_message',
+      'responder_report',
+      'admin_update_requested',
+    };
+    return timeline.where((e) => spoken.contains(e.event)).toList()
+      ..sort((a, b) => a.at.compareTo(b.at));
+  }
+
+  /// Whether the responder has reported standing at the scene.
+  bool get hasArrived => status == 'arrived';
+
+  /// A dispatcher has sent this to someone who has not answered yet. Until they
+  /// do, nobody can say help is actually coming.
+  bool get awaitingAcknowledgement =>
+      assignedResponderId != null && assignmentAckAt == null && isActive;
   bool get isCritical => priority == 'critical';
   bool get isIoT => source == 'iot_keychain' || source == 'iot_device';
   bool get isPanicButton => source == 'iot_device';
@@ -105,6 +149,11 @@ class EmergencyTimelineEvent {
   final DateTime at;
   final String? actorRole;
   final String? note;
+  /// The canned update this came from, when it was sent as one tap.
+  final String? code;
+  /// `all` means the person in the emergency sees it too; `dispatch` keeps it
+  /// between the responder and the dispatcher.
+  final String? audience;
   final String? reportType;
   final String? reportStatus;
 
@@ -113,6 +162,8 @@ class EmergencyTimelineEvent {
     required this.at,
     this.actorRole,
     this.note,
+    this.code,
+    this.audience,
     this.reportType,
     this.reportStatus,
   });
@@ -123,6 +174,8 @@ class EmergencyTimelineEvent {
       at: json['at'] != null ? DateTime.tryParse(json['at'] as String) ?? DateTime.now() : DateTime.now(),
       actorRole: json['actorRole'] as String?,
       note: json['note'] as String?,
+      code: json['code'] as String?,
+      audience: json['audience'] as String?,
       reportType: json['reportType'] as String?,
       reportStatus: json['reportStatus'] as String?,
     );

@@ -7,6 +7,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
 import 'core/config/app_config.dart';
+import 'core/config/server_config.dart';
 import 'core/services/offline_sync_service.dart';
 import 'core/storage/secure_storage.dart';
 import 'core/theme/app_theme.dart';
@@ -21,6 +22,9 @@ void main() async {
   await Hive.openBox<String>('offline_queue');
   await Hive.openBox<String>('pending_alerts');
   await Hive.openBox<String>('active_emergency');
+  await Hive.openBox<String>(ServerConfigStore.boxName);
+  // Before runApp, so the very first request goes to the saved address.
+  ServerConfigStore.restore();
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -158,6 +162,11 @@ class _TanzAlertAppState extends ConsumerState<TanzAlertApp>
       'emergency.iot_device_created',
       'emergency.updated',
       'emergency.assigned',
+      // A responder handing the incident back, or a dispatch nobody answered:
+      // either way it is waiting on a responder again and the screen must stop
+      // saying somebody is coming.
+      'emergency.released',
+      'emergency.assignment_expired',
       'emergency.responder_on_the_way',
       'emergency.responder_nearby',
       'emergency.resolved',

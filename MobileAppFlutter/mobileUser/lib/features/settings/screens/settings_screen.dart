@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/config/server_config.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/widgets/server_address_sheet.dart';
 import '../../auth/providers/auth_provider.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -9,6 +11,7 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(currentUserProvider);
+    final server = ref.watch(serverConfigProvider);
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
@@ -38,6 +41,19 @@ class SettingsScreen extends ConsumerWidget {
             title: const Text('Help & Support'),
             subtitle: const Text('Contact MDRRMO: +6346-422-2100'),
             onTap: () {},
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.dns_outlined),
+            title: const Text('Server address'),
+            subtitle: Text(
+              server.isCustom
+                  ? '${server.apiBaseUrl}\nSaved on this device'
+                  : '${server.apiBaseUrl}\nFrom this build',
+            ),
+            isThreeLine: true,
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => showServerAddressSheet(context),
           ),
           const Divider(),
           ListTile(

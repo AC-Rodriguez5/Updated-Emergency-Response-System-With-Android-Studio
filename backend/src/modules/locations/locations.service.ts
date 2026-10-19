@@ -7,6 +7,8 @@ import {
   User,
   type DutyStatus,
 } from '../../models/index.js';
+import { env } from '../../config/env.js';
+import { emitEmergencyEvent } from '../emergencies/events.js';
 import { AppError } from '../../shared/middleware/errorHandler.js';
 import type { AuthContext } from '../../shared/types/http.js';
 import type { HistoryQuery, IngestLocationInput } from './locations.schemas.js';
@@ -81,6 +83,66 @@ export async function ingestUserLocation(
   return sample;
 }
 
+/** Metres between two WGS84 points. */
+function metresBetween(
+  [lngA, latA]: [number, number],
+  [lngB, latB]: [number, number],
+): number {
+  const earthRadius = 6371000;
+  const toRad = (deg: number): number => (deg * Math.PI) / 180;
+  const dLat = toRad(latB - latA);
+  const dLng = toRad(lngB - lngA);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(latA)) * Math.cos(toRad(latB)) * Math.sin(dLng / 2) ** 2;
+  return 2 * earthRadius * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+/**
+ * Says "they are nearly here" without anybody pressing anything.
+ *
+ * The responder is already streaming their position against this incident, so
+ * the one fact the person waiting most wants is sitting in the data. It fires
+ * once -- the status only moves out of `assigned` or `responder_on_the_way` --
+ * so a responder circling the block cannot send the same promise five times.
+ *
+ * An incident with no fix yet, a panic button still hunting for GNSS, has
+ * nothing to be near and is left alone rather than guessed at.
+ */
+async function flagResponderNearby(
+  input: IngestLocationInput,
+  auth: AuthContext,
+  ctx: ServiceCtx,
+): Promise<void> {
+  if (!input.emergencyId) return;
+  const emergency = await Emergency.findById(input.emergencyId);
+  if (!emergency) return;
+  if (emergency.assignedResponderId?.toString() !== auth.accountId) return;
+  if (emergency.status !== 'assigned' && emergency.status !== 'responder_on_the_way') {
+    return;
+  }
+  const scene = emergency.currentLocation?.coordinates;
+  if (!scene) return;
+
+  const metres = metresBetween(
+    input.coordinates as [number, number],
+    scene as [number, number],
+  );
+  if (metres > env.RESPONDER_NEARBY_METERS) return;
+
+  emergency.status = 'responder_nearby';
+  emergency.timeline.push({
+    event: 'responder_nearby',
+    at: new Date(),
+    actorId: new mongoose.Types.ObjectId(auth.accountId),
+    actorRole: 'system',
+    note: `Responder within ${Math.round(metres)} m of the scene.`,
+  } as never);
+  await emergency.save();
+
+  emitEmergencyEvent(ctx.io, 'emergency.responder_nearby', emergency);
+}
+
 export async function ingestResponderLocation(
   input: IngestLocationInput,
   auth: AuthContext,
@@ -132,6 +194,14 @@ export async function ingestResponderLocation(
     capturedAt: input.capturedAt,
     emergencyId: input.emergencyId,
   });
+
+  // After the broadcast: a failure in the proximity check must not cost the
+  // dashboard the live position, which is the more important of the two.
+  try {
+    await flagResponderNearby(input, auth, ctx);
+  } catch (err) {
+    console.error('[locations] responder-nearby check failed', err);
+  }
 
   if (input.emergencyId) {
     const emergency = await Emergency.findById(input.emergencyId)

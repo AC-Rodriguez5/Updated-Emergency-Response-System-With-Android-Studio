@@ -5,10 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:socket_io_client/socket_io_client.dart' as io;
 import '../../../core/config/app_config.dart';
-import '../../../core/storage/secure_storage.dart';
+import '../../../core/realtime/incident_socket.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../incident_thread/screens/incident_thread_sheet.dart';
 import '../../../core/widgets/status_badge.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../models/emergency_model.dart';
@@ -24,7 +24,11 @@ class EmergencyMapScreen extends ConsumerStatefulWidget {
 class _EmergencyMapScreenState extends ConsumerState<EmergencyMapScreen> {
   LatLng? _myLocation;
   String? _typeFilter;
-  io.Socket? _socket;
+  /// The incident whose detail sheet is open, so it can be closed if dispatch
+  /// resolves it mid-read.
+  String? _openDetailId;
+  StreamSubscription<IncidentEvent>? _eventsSub;
+  StreamSubscription<bool>? _connectionSub;
   bool _loading = true;
   bool _socketConnected = false;
   final MapController _mapController = MapController();
@@ -39,7 +43,7 @@ class _EmergencyMapScreenState extends ConsumerState<EmergencyMapScreen> {
     // Kick off the three startup steps independently so a slow GPS fix
     // never blocks the alert feed or the live socket connection.
     unawaited(_loadFeed());
-    unawaited(_connectSocket());
+    _listenForIncidents();
     unawaited(_getLocation());
   }
 
@@ -77,82 +81,67 @@ class _EmergencyMapScreenState extends ConsumerState<EmergencyMapScreen> {
     }
   }
 
-  Future<void> _connectSocket() async {
-    final token = await ref.read(secureStorageProvider).getAccessToken();
-    _socket = io.io(
-      AppConfig.apiBaseUrl.replaceAll('/api', ''),
-      io.OptionBuilder()
-          .setTransports(['websocket'])
-          .setAuth({'token': token})
-          .enableForceNew()
-          .setReconnectionDelay(2000)
-          .setReconnectionDelayMax(10000)
-          .build(),
+  /// Mirrors the session-wide incident stream into this screen's feed.
+  ///
+  /// The socket belongs to the session rather than to this tab (see
+  /// [IncidentSocket]): a dispatcher's message used to arrive only while the
+  /// live map happened to be open, and go nowhere otherwise.
+  void _listenForIncidents() {
+    final socket = ref.read(incidentSocketProvider);
+    _socketConnected = socket.isConnected;
+    _connectionSub = socket.connection.listen((up) {
+      if (mounted) setState(() => _socketConnected = up);
+    });
+    _eventsSub = socket.events.listen(
+      (event) => unawaited(_handleEvent(event.data)),
     );
-    _socket!.onConnect((_) {
-      if (mounted) setState(() => _socketConnected = true);
-    });
-    _socket!.onDisconnect((_) {
-      if (mounted) setState(() => _socketConnected = false);
-    });
-    _socket!.onConnectError((_) {
-      if (mounted) setState(() => _socketConnected = false);
-    });
-    _socket!.onError((_) {
-      if (mounted) setState(() => _socketConnected = false);
-    });
-    Future<void> handleEvent(dynamic data) async {
-      try {
-        final payload = data as Map<String, dynamic>;
-        final id =
-            payload['emergencyId'] as String? ??
-            payload['_id'] as String? ??
-            payload['id'] as String? ??
-            '';
-        final status = payload['status'] as String?;
-        final type = payload['type'] as String?;
-        final responder = ref.read(currentResponderProvider);
-        final isAssignedToMe =
-            payload['assignedResponderId'] != null &&
-            payload['assignedResponderId'] == responder?.id;
-        if (id.isEmpty) return;
-        if (status == 'resolved' || status == 'cancelled') {
-          ref.read(emergencyFeedProvider.notifier).remove(id);
-          return;
-        }
-        if (type != null &&
-            responder != null &&
-            !isAssignedToMe &&
-            !responder.canHandleEmergencyType(type)) {
-          ref.read(emergencyFeedProvider.notifier).remove(id);
-          return;
-        }
-        final full = await ref.read(emergencyRepositoryProvider).getOne(id);
-        if (!full.isActive) {
-          ref.read(emergencyFeedProvider.notifier).remove(id);
-        } else {
-          ref.read(emergencyFeedProvider.notifier).upsert(full);
-        }
-      } catch (_) {}
-    }
+  }
 
-    _socket!.on('emergency.created', handleEvent);
-    _socket!.on('emergency.iot_keychain_created', handleEvent);
-    _socket!.on('emergency.iot_device_created', handleEvent);
-    // The hardware panic button streams fixes for the life of its incident; each
-    // one can move the pin or supply the very first position.
-    _socket!.on('emergency.location_updated', handleEvent);
-    _socket!.on('emergency.updated', handleEvent);
-    _socket!.on('emergency.assigned', handleEvent);
-    _socket!.on('emergency.responder_on_the_way', handleEvent);
-    _socket!.on('emergency.responder_report', handleEvent);
-    _socket!.on('emergency.update_requested', handleEvent);
-    _socket!.on('emergency.resolved', handleEvent);
+  Future<void> _handleEvent(Map<String, dynamic> payload) async {
+    try {
+      final id =
+          payload['emergencyId'] as String? ??
+          payload['_id'] as String? ??
+          payload['id'] as String? ??
+          '';
+      final status = payload['status'] as String?;
+      final type = payload['type'] as String?;
+      final responder = ref.read(currentResponderProvider);
+      final isAssignedToMe =
+          payload['assignedResponderId'] != null &&
+          payload['assignedResponderId'] == responder?.id;
+      if (id.isEmpty) return;
+      if (status == 'resolved' || status == 'cancelled') {
+        ref.read(emergencyFeedProvider.notifier).remove(id);
+        // Closing an incident out from under somebody who is reading it leaves
+        // them looking at buttons that no longer do anything. The snackbar
+        // raised in main.dart says what happened.
+        if (_openDetailId == id && mounted) {
+          _openDetailId = null;
+          Navigator.of(context).popUntil((route) => route.isFirst);
+        }
+        return;
+      }
+      if (type != null &&
+          responder != null &&
+          !isAssignedToMe &&
+          !responder.canHandleEmergencyType(type)) {
+        ref.read(emergencyFeedProvider.notifier).remove(id);
+        return;
+      }
+      final full = await ref.read(emergencyRepositoryProvider).getOne(id);
+      if (!full.isActive) {
+        ref.read(emergencyFeedProvider.notifier).remove(id);
+      } else {
+        ref.read(emergencyFeedProvider.notifier).upsert(full);
+      }
+    } catch (_) {}
   }
 
   @override
   void dispose() {
-    _socket?.disconnect();
+    unawaited(_eventsSub?.cancel());
+    unawaited(_connectionSub?.cancel());
     super.dispose();
   }
 
@@ -197,20 +186,23 @@ class _EmergencyMapScreenState extends ConsumerState<EmergencyMapScreen> {
             ),
           ],
         ),
+        // No colour overrides: the app bar is light, so these inherit the
+        // theme's near-black foreground. They were pinned to white, which left
+        // three invisible buttons on a white bar.
         actions: [
           IconButton(
-            icon: const Icon(
-              Icons.airport_shuttle_outlined,
-              color: Colors.white,
-            ),
+            tooltip: 'Ambulance assignments',
+            icon: const Icon(Icons.airport_shuttle_outlined),
             onPressed: () => context.go('/ambulance'),
           ),
           IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.white),
+            tooltip: 'Refresh',
+            icon: const Icon(Icons.refresh),
             onPressed: _loadFeed,
           ),
           IconButton(
-            icon: const Icon(Icons.settings_outlined, color: Colors.white),
+            tooltip: 'Settings',
+            icon: const Icon(Icons.settings_outlined),
             onPressed: () => context.go('/settings'),
           ),
         ],
@@ -357,6 +349,7 @@ class _EmergencyMapScreenState extends ConsumerState<EmergencyMapScreen> {
   }
 
   void _showDetail(BuildContext context, EmergencyModel em) {
+    _openDetailId = em.id;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -364,7 +357,7 @@ class _EmergencyMapScreenState extends ConsumerState<EmergencyMapScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (_) => _EmergencyDetailSheet(emergency: em, ref: ref),
-    );
+    ).whenComplete(() => _openDetailId = null);
   }
 }
 
@@ -582,6 +575,45 @@ class _EmergencyDetailSheet extends StatelessWidget {
           _OnTheWayRow(emergency: emergency, ref: ref),
           const SizedBox(height: 12),
           OutlinedButton.icon(
+            icon: const Icon(Icons.forum_outlined),
+            label: Text(
+              emergency.conversation.isEmpty
+                  ? 'Open incident channel'
+                  : 'Incident channel (${emergency.conversation.length})',
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.responderBlue,
+            ),
+            onPressed: () {
+              Navigator.pop(context);
+              showIncidentThread(context, ref, emergency);
+            },
+          ),
+          if (emergency.hasArrived) ...[
+            const SizedBox(height: 10),
+            // The question at this point is no longer where the patient is.
+            ElevatedButton.icon(
+              icon: const Icon(Icons.local_hospital_outlined),
+              label: const Text('Nearest facilities'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.signalCyan,
+                foregroundColor: AppColors.command,
+              ),
+              onPressed: () {
+                Navigator.pop(context);
+                context.push(
+                  '/facilities',
+                  extra: {
+                    'lat': emergency.lat,
+                    'lng': emergency.lng,
+                    'type': emergency.type,
+                  },
+                );
+              },
+            ),
+          ],
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
             icon: const Icon(Icons.report_outlined),
             label: const Text('Submit field report'),
             onPressed: () {
@@ -653,6 +685,55 @@ class _AdminUpdateRequestCard extends StatelessWidget {
   }
 }
 
+/// Asks why an assignment is being handed back.
+///
+/// Optional, and skippable — a responder who cannot take a call is usually busy
+/// with something worse — but "already on another call" is exactly what tells a
+/// dispatcher whether to send the next-nearest unit or chase this one.
+Future<String?> _askReleaseReason(BuildContext context) async {
+  final controller = TextEditingController();
+  final reason = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Hand back to dispatch'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'This returns the incident to the pending pool so another responder '
+            'or a dispatcher can take it.',
+            style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: controller,
+            autofocus: true,
+            maxLength: 120,
+            decoration: const InputDecoration(
+              labelText: 'Reason (optional)',
+              hintText: 'Already on another call',
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('Keep it'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext, controller.text),
+          style: TextButton.styleFrom(foregroundColor: AppColors.alertRed),
+          child: const Text('Hand back'),
+        ),
+      ],
+    ),
+  );
+  controller.dispose();
+  return reason;
+}
+
 class _DetailRow extends StatelessWidget {
   final String label;
   final String value;
@@ -720,10 +801,12 @@ class _OnTheWayRowState extends State<_OnTheWayRow> {
     final currentId = responder?.id;
     final status = widget.emergency.status;
     final isPending = status == 'pending';
-    final isMyAssignment =
-        status == 'assigned' &&
-        widget.emergency.assignedResponderId != null &&
-        widget.emergency.assignedResponderId == currentId;
+    final isMine =
+        currentId != null && widget.emergency.assignedResponderId == currentId;
+    final isMyAssignment = status == 'assigned' && isMine;
+    // A dispatcher sent this here and is waiting to hear that a person, not a
+    // phone in a pocket, has it.
+    final needsAcknowledgement = isMine && widget.emergency.assignmentAckAt == null;
     final canSelfAccept =
         isPending && (responder?.canSelfAssign(widget.emergency.type) ?? false);
     final outOfRole =
@@ -775,6 +858,105 @@ class _OnTheWayRowState extends State<_OnTheWayRow> {
             ),
           ),
         ],
+        if (isPending && widget.emergency.dispatchOverdue) ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.softRed,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.timer_outlined, size: 16, color: AppColors.alertRed),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Still waiting for a responder. Nobody has accepted this yet.',
+                    style: TextStyle(fontSize: 12, color: AppColors.alertRed),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        if (needsAcknowledgement) ...[
+          const SizedBox(height: 10),
+          ElevatedButton.icon(
+            icon: _loading
+                ? const SizedBox(
+                    height: 18,
+                    width: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.how_to_reg),
+            label: const Text('Acknowledge — I am taking this'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.successGreen,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: _loading
+                ? null
+                : () => _run(() async {
+                    await widget.ref
+                        .read(emergencyRepositoryProvider)
+                        .acknowledgeAssignment(widget.emergency.id);
+                    if (context.mounted) {
+                      Navigator.pop(context);
+                      await widget.ref
+                          .read(emergencyFeedProvider.notifier)
+                          .refresh();
+                    }
+                  }),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Dispatch takes this back automatically if nobody answers.',
+            style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+          ),
+        ],
+        if (isMine) ...[
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.undo),
+            label: Text(
+              needsAcknowledgement ? 'Can\'t take this' : 'Release to dispatch',
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.alertRed,
+            ),
+            onPressed: _loading
+                ? null
+                : () async {
+                    final reason = await _askReleaseReason(context);
+                    if (reason == null) return;
+                    await _run(() async {
+                      await widget.ref
+                          .read(emergencyRepositoryProvider)
+                          .releaseAssignment(
+                            widget.emergency.id,
+                            reason: reason,
+                          );
+                      if (context.mounted) {
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Handed back to dispatch. It is open for anyone again.',
+                            ),
+                          ),
+                        );
+                        await widget.ref
+                            .read(emergencyFeedProvider.notifier)
+                            .refresh();
+                      }
+                    });
+                  },
+          ),
+        ],
         if (canSelfAccept) ...[
           const SizedBox(height: 10),
           ElevatedButton.icon(
@@ -809,6 +991,41 @@ class _OnTheWayRowState extends State<_OnTheWayRow> {
                           backgroundColor: AppColors.successGreen,
                         ),
                       );
+                      await widget.ref
+                          .read(emergencyFeedProvider.notifier)
+                          .refresh();
+                    }
+                  }),
+          ),
+        ],
+        if (isMine &&
+            (status == 'responder_on_the_way' ||
+                status == 'responder_nearby')) ...[
+          const SizedBox(height: 10),
+          ElevatedButton.icon(
+            icon: _loading
+                ? const SizedBox(
+                    height: 18,
+                    width: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.place),
+            label: const Text('Arrived on scene'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.command,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: _loading
+                ? null
+                : () => _run(() async {
+                    await widget.ref
+                        .read(emergencyRepositoryProvider)
+                        .markArrived(widget.emergency.id);
+                    if (context.mounted) {
+                      Navigator.pop(context);
                       await widget.ref
                           .read(emergencyFeedProvider.notifier)
                           .refresh();

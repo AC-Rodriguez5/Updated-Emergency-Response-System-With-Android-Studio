@@ -59,6 +59,7 @@ class _AmbulanceFormScreenState extends ConsumerState<AmbulanceFormScreen> {
       MaterialPageRoute(
         builder: (_) => MapPickerScreen(
           title: 'Select Pickup Location',
+          mode: MapPickerMode.pickup,
           initialLat: _pickupLocation?.lat,
           initialLng: _pickupLocation?.lng,
           initialLabel: _pickupLocation?.label,
@@ -73,6 +74,7 @@ class _AmbulanceFormScreenState extends ConsumerState<AmbulanceFormScreen> {
       MaterialPageRoute(
         builder: (_) => MapPickerScreen(
           title: 'Select Drop-off Location',
+          mode: MapPickerMode.dropoff,
           initialLat: _dropoffLocation?.lat,
           initialLng: _dropoffLocation?.lng,
           initialLabel: _dropoffLocation?.label,

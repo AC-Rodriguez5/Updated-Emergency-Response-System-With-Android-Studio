@@ -17,6 +17,14 @@ const envSchema = z.object({
         .map((s) => s.trim())
         .filter(Boolean)),
     BODY_LIMIT: z.string().default('1mb'),
+    // Dispatch watchdog. An assignment is a claim that somebody is coming; these
+    // decide how long the system believes that claim before saying otherwise.
+    DISPATCH_ACK_SECONDS: z.coerce.number().int().positive().default(90),
+    DISPATCH_OVERDUE_SECONDS: z.coerce.number().int().positive().default(120),
+    DISPATCH_SWEEP_SECONDS: z.coerce.number().int().positive().default(20),
+    // How close counts as "nearly there". Matches nearArrivalRadiusMeters in the
+    // responder app, and is loose enough to survive ordinary phone GPS error.
+    RESPONDER_NEARBY_METERS: z.coerce.number().int().positive().default(200),
     ADMIN_EMAIL: z.string().email(),
     ADMIN_PASSWORD: z.string().min(8, 'ADMIN_PASSWORD must be at least 8 chars'),
     ADMIN_NAME: z.string().default('TanzAlert Admin'),

@@ -94,6 +94,7 @@ export default function AmbulanceRequestsPage() {
   const [selectedResponder, setSelectedResponder] = useState<string>('');
   const [assignmentError, setAssignmentError] = useState<string | null>(null);
   const [assignmentSuccess, setAssignmentSuccess] = useState<string | null>(null);
+  const dialogOpen = rejectModal || assignModal;
 
   const { data: listData, isLoading, refetch } = useQuery({
     queryKey: ['ambulance-requests', statusFilter, includeArchived],
@@ -422,7 +423,16 @@ export default function AmbulanceRequestsPage() {
               </dl>
             </div>
 
-            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+            {/*
+              Leaflet paints its own panes at z-index 400 and up. The map card is not a
+              stacking context, so those panes used to outrank the modal overlay (z-40)
+              and the tiles floated on top of the Assign / Reject dialogs. `isolate`
+              traps them inside this card, and the map is unmounted outright while a
+              dialog is open -- nothing to float, and no hidden map holding tile
+              requests open behind the overlay.
+            */}
+            {!dialogOpen && (
+            <div className="isolate bg-white rounded-2xl border border-slate-200 overflow-hidden">
               <div className="p-4 border-b border-slate-100">
                 <h2 className="font-bold text-slate-900 text-sm">Route Map</h2>
                 <p className="text-xs text-slate-500 mt-1">
@@ -447,6 +457,7 @@ export default function AmbulanceRequestsPage() {
                 </MapContainer>
               </div>
             </div>
+            )}
           </div>
         </div>
 

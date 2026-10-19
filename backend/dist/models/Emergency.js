@@ -5,6 +5,8 @@ const timelineEventSchema = new Schema({
     actorId: { type: Schema.Types.ObjectId },
     actorRole: { type: String, enum: ['user', 'responder', 'admin', 'system'] },
     note: { type: String, trim: true, maxlength: 1000 },
+    code: { type: String, trim: true, maxlength: 40 },
+    audience: { type: String, enum: ['dispatch', 'all'] },
     reportType: {
         type: String,
         enum: ['arrival', 'field_report', 'follow_up', 'resolution_request'],
@@ -73,6 +75,9 @@ const emergencySchema = new Schema({
     },
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     assignedResponderId: { type: Schema.Types.ObjectId, ref: 'Responder' },
+    assignmentAckAt: { type: Date },
+    assignmentDeadlineAt: { type: Date },
+    dispatchOverdueAt: { type: Date },
     currentLocation: { type: currentLocationSchema, required: false },
     locationStatus: {
         type: String,
@@ -117,6 +122,9 @@ emergencySchema.index({ userId: 1, sourceDeviceId: 1, hardwareEventId: 1 }, {
     unique: true,
     partialFilterExpression: { hardwareEventId: { $type: 'string' } },
 });
+// The dispatch watchdog sweeps on exactly these two shapes.
+emergencySchema.index({ status: 1, assignmentDeadlineAt: 1 });
+emergencySchema.index({ status: 1, dispatchOverdueAt: 1, createdAt: 1 });
 emergencySchema.index({ currentLocation: '2dsphere' });
 emergencySchema.index({ outsideScopeFlag: 1, status: 1 });
 // The panic button re-posts its position every few seconds against this triple.

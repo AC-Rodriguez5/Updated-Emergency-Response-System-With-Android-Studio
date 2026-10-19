@@ -53,6 +53,22 @@ class EmergencyRepository {
     }
   }
 
+  /// The responder's own closed calls, newest first.
+  Future<List<EmergencyModel>> getHistory({int page = 1, int limit = 50}) async {
+    try {
+      final response = await _dio.get(
+        '/emergencies/history',
+        queryParameters: {'page': page, 'limit': limit},
+      );
+      final data = (response.data as Map<String, dynamic>)['data'] as Map<String, dynamic>;
+      final items = data['items'] as List? ?? [];
+      return items
+          .whereType<Map<String, dynamic>>()
+          .map(EmergencyModel.fromJson)
+          .toList();
+    } on DioException catch (e) { throw dioErrorToApiException(e); }
+  }
+
   Future<EmergencyModel> getOne(String id) async {
     try {
       final response = await _dio.get('/emergencies/$id');
@@ -70,6 +86,55 @@ class EmergencyRepository {
   Future<EmergencyModel> claimEmergency(String id) async {
     try {
       final response = await _dio.post('/emergencies/$id/assign', data: {});
+      return EmergencyModel.fromJson((response.data as Map<String, dynamic>)['data'] as Map<String, dynamic>);
+    } on DioException catch (e) { throw dioErrorToApiException(e); }
+  }
+
+  /// Reports standing at the scene. This is the timestamp a response time
+  /// should be measured to — not when somebody answered the radio.
+  Future<EmergencyModel> markArrived(String id) async {
+    try {
+      final response = await _dio.post('/emergencies/$id/arrived', data: {});
+      return EmergencyModel.fromJson((response.data as Map<String, dynamic>)['data'] as Map<String, dynamic>);
+    } on DioException catch (e) { throw dioErrorToApiException(e); }
+  }
+
+  /// One line on the incident. [audience] of `all` reaches the person who
+  /// raised the alert; `dispatch` stays between the responder and dispatch.
+  Future<EmergencyModel> sendMessage(
+    String id, {
+    required String message,
+    String audience = 'dispatch',
+    String? code,
+  }) async {
+    try {
+      final response = await _dio.post(
+        '/emergencies/$id/message',
+        data: {
+          'message': message,
+          'audience': audience,
+          'code': ?code,
+        },
+      );
+      return EmergencyModel.fromJson((response.data as Map<String, dynamic>)['data'] as Map<String, dynamic>);
+    } on DioException catch (e) { throw dioErrorToApiException(e); }
+  }
+
+  /// Answers a dispatcher's assignment: yes, I have it.
+  Future<EmergencyModel> acknowledgeAssignment(String id) async {
+    try {
+      final response = await _dio.post('/emergencies/$id/acknowledge', data: {});
+      return EmergencyModel.fromJson((response.data as Map<String, dynamic>)['data'] as Map<String, dynamic>);
+    } on DioException catch (e) { throw dioErrorToApiException(e); }
+  }
+
+  /// Hands the incident back to the pending pool so somebody else can take it.
+  Future<EmergencyModel> releaseAssignment(String id, {String? reason}) async {
+    try {
+      final response = await _dio.post(
+        '/emergencies/$id/release',
+        data: {if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim()},
+      );
       return EmergencyModel.fromJson((response.data as Map<String, dynamic>)['data'] as Map<String, dynamic>);
     } on DioException catch (e) { throw dioErrorToApiException(e); }
   }

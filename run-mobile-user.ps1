@@ -66,6 +66,28 @@ if ($api.StartsWith('https://')) {
   Write-Host "  The wearable will relay alerts through this phone over Bluetooth." -ForegroundColor DarkGray
 }
 
+# Preflight: a stale adb server sometimes loses a USB device's serial number and
+# reports it as "(no serial number)". Flutter then cannot read the device's
+# properties ("Error 1 retrieving device properties"), calls it unsupported, and
+# the install never starts. Restarting the server re-reads the serial.
+$adb = if ($env:ANDROID_HOME) { Join-Path $env:ANDROID_HOME 'platform-tools\adb.exe' }
+       elseif ($env:ANDROID_SDK_ROOT) { Join-Path $env:ANDROID_SDK_ROOT 'platform-tools\adb.exe' }
+       else { Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe' }
+
+if (Test-Path $adb) {
+  if ((& $adb devices) -match '\(no serial number\)') {
+    Write-Host "adb lost a device's serial number -- restarting the adb server." -ForegroundColor Yellow
+    & $adb kill-server | Out-Null
+    Start-Sleep -Seconds 1
+    & $adb start-server | Out-Null
+    if ((& $adb devices) -match '\(no serial number\)') {
+      Write-Host "Still no serial number. Unplug and replug the cable (use 'File transfer'" -ForegroundColor Red
+      Write-Host "USB mode), or go wireless: adb tcpip 5555; adb connect <phone-ip>:5555" -ForegroundColor Red
+      exit 1
+    }
+  }
+}
+
 if ($DeviceId) { $defines += @('-d', $DeviceId) }
 
 Set-Location (Join-Path $root 'MobileAppFlutter\mobileUser')

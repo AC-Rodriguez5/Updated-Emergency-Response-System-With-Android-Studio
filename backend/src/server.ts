@@ -10,6 +10,7 @@ import { verifyAccessToken } from './modules/auth/jwt.js';
 import type { AuthContext, AuthRole } from './shared/types/http.js';
 import { Responder } from './models/index.js';
 import { emergencyTypesForResponder } from './modules/emergencies/responderRoleAccess.js';
+import { startDispatchWatchdog } from './modules/emergencies/dispatch.watchdog.js';
 
 interface SocketData {
   auth?: AuthContext;
@@ -89,6 +90,7 @@ async function bootstrap(): Promise<void> {
   });
 
   app.set('io', io);
+  startDispatchWatchdog(io);
 
   io.on('connection', (socket: Socket & { data: SocketData }) => {
     const auth = socket.data.auth;

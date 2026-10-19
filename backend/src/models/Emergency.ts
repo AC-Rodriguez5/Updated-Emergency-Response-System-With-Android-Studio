@@ -21,12 +21,29 @@ export type EmergencyStatus =
  */
 export type EmergencyLocationStatus = 'pending' | 'fixed';
 
+/**
+ * Who a note on the incident is for.
+ *
+ * `dispatch` is the working channel between a dispatcher and the responder, and
+ * the person in the emergency never sees it: "scene not secure, hold back" is
+ * necessary to say and would be terrifying to read about yourself. `all` is
+ * deliberately addressed to them as well.
+ */
+export type TimelineAudience = 'dispatch' | 'all';
+
 export interface ITimelineEvent {
   event: string;
   at: Date;
   actorId?: mongoose.Types.ObjectId;
   actorRole?: 'user' | 'responder' | 'admin' | 'system';
   note?: string;
+  /**
+   * A canned update picked from a list rather than typed — `on_scene`,
+   * `need_backup`, `transporting`. One tap beats a paragraph when the sender is
+   * holding a torch, and every reader renders the same words for it.
+   */
+  code?: string;
+  audience?: TimelineAudience;
   reportType?: 'arrival' | 'field_report' | 'follow_up' | 'resolution_request';
   reportStatus?: 'submitted' | 'reviewed' | 'needs_update' | 'accepted';
 }
@@ -53,6 +70,19 @@ export interface IEmergency extends Document {
   status: EmergencyStatus;
   userId: mongoose.Types.ObjectId;
   assignedResponderId?: mongoose.Types.ObjectId;
+  /**
+   * When the assigned responder confirmed they are taking it.
+   *
+   * A responder who accepts from the feed acknowledges by the act of accepting.
+   * A dispatcher's assignment does not: assigning a phone in someone's pocket is
+   * not the same as assigning a person, so it stays empty until the responder
+   * answers, and [assignmentDeadlineAt] decides how long that may take.
+   */
+  assignmentAckAt?: Date;
+  /** When an unanswered assignment stops being believed. */
+  assignmentDeadlineAt?: Date;
+  /** Set by the dispatch watchdog when nobody has taken an incident in time. */
+  dispatchOverdueAt?: Date;
   currentLocation?: {
     type: 'Point';
     coordinates: [number, number];
@@ -95,6 +125,8 @@ const timelineEventSchema = new Schema<ITimelineEvent>(
     actorId: { type: Schema.Types.ObjectId },
     actorRole: { type: String, enum: ['user', 'responder', 'admin', 'system'] },
     note: { type: String, trim: true, maxlength: 1000 },
+    code: { type: String, trim: true, maxlength: 40 },
+    audience: { type: String, enum: ['dispatch', 'all'] },
     reportType: {
       type: String,
       enum: ['arrival', 'field_report', 'follow_up', 'resolution_request'],
@@ -175,6 +207,9 @@ const emergencySchema = new Schema<IEmergency>(
     },
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     assignedResponderId: { type: Schema.Types.ObjectId, ref: 'Responder' },
+    assignmentAckAt: { type: Date },
+    assignmentDeadlineAt: { type: Date },
+    dispatchOverdueAt: { type: Date },
     currentLocation: { type: currentLocationSchema, required: false },
     locationStatus: {
       type: String,
@@ -225,6 +260,9 @@ emergencySchema.index(
     partialFilterExpression: { hardwareEventId: { $type: 'string' } },
   },
 );
+// The dispatch watchdog sweeps on exactly these two shapes.
+emergencySchema.index({ status: 1, assignmentDeadlineAt: 1 });
+emergencySchema.index({ status: 1, dispatchOverdueAt: 1, createdAt: 1 });
 emergencySchema.index({ currentLocation: '2dsphere' });
 emergencySchema.index({ outsideScopeFlag: 1, status: 1 });
 // The panic button re-posts its position every few seconds against this triple.

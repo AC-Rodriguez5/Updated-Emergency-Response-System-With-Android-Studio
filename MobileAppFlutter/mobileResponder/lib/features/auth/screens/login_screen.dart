@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:safealert_ui/safealert_ui.dart';
 import '../providers/auth_provider.dart';
+import '../../../core/config/server_config.dart';
 import '../../../core/networking/api_exception.dart';
+import '../../../core/widgets/server_address_sheet.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -45,7 +47,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       setState(
         () => _error = e.isNotApproved
             ? 'Your account is pending admin approval.'
-            : e.message,
+            : _describe(e.message),
       );
     } catch (_) {
       setState(() => _error = 'Login failed. Check your connection.');
@@ -54,8 +56,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
   }
 
+  /// A request that never reached the backend reports the raw transport
+  /// failure, which reads as a bug in the app rather than as a wrong address.
+  String _describe(String message) {
+    const transport = [
+      'Failed host lookup',
+      'SocketException',
+      'Connection refused',
+      'Connection timed out',
+      'connection errored',
+    ];
+    if (!transport.any(message.contains)) return message;
+    final host = ref.read(serverConfigProvider).host;
+    return 'Cannot reach $host. The server address may have changed - check it '
+        'below.';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final server = ref.watch(serverConfigProvider);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -146,6 +165,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         child: const Text('Register'),
                       ),
                     ],
+                  ),
+                  Center(
+                    child: TextButton.icon(
+                      onPressed: () => showServerAddressSheet(context),
+                      icon: const Icon(Icons.dns_outlined, size: 15),
+                      label: Text(
+                        'Server: ${server.host}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.textMuted,
+                      ),
+                    ),
                   ),
                 ],
               ),

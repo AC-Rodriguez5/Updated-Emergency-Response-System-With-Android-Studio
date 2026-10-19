@@ -9,10 +9,17 @@ export type EmergencyEventName =
   | 'emergency.iot_device_created'
   | 'emergency.updated'
   | 'emergency.assigned'
+  | 'emergency.assignment_acknowledged'
+  | 'emergency.assignment_expired'
+  | 'emergency.released'
+  | 'emergency.dispatch_overdue'
   | 'emergency.responder_on_the_way'
   | 'emergency.responder_nearby'
+  | 'emergency.responder_arrived'
+  | 'emergency.message'
   | 'emergency.responder_report'
   | 'emergency.update_requested'
+  | 'emergency.user_message'
   | 'emergency.location_updated'
   | 'emergency.resolved';
 
@@ -24,6 +31,12 @@ export interface EmergencyEventPayload {
   priority: IEmergency['priority'];
   userId: string;
   assignedResponderId?: string;
+  /** Absent while a dispatcher's assignment is still unanswered. */
+  assignmentAckAt?: string;
+  /** When an unanswered assignment expires. Absent on a self-accept. */
+  assignmentDeadlineAt?: string;
+  /** True once the watchdog has flagged an incident nobody has taken. */
+  dispatchOverdue: boolean;
   isInsideTanza: boolean;
   outsideScopeFlag: boolean;
   barangay?: string;
@@ -50,6 +63,9 @@ function buildPayload(emergency: IEmergency): EmergencyEventPayload {
     priority: emergency.priority,
     userId: emergency.userId.toString(),
     assignedResponderId: emergency.assignedResponderId?.toString(),
+    assignmentAckAt: emergency.assignmentAckAt?.toISOString(),
+    assignmentDeadlineAt: emergency.assignmentDeadlineAt?.toISOString(),
+    dispatchOverdue: !!emergency.dispatchOverdueAt,
     isInsideTanza: emergency.isInsideTanza,
     outsideScopeFlag: emergency.outsideScopeFlag,
     barangay: emergency.barangay,

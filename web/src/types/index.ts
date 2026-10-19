@@ -143,6 +143,13 @@ export interface TimelineEvent {
   actorId?: string;
   actorRole?: string;
   note?: string;
+  /** The canned update this was sent as, when it was one tap rather than typed. */
+  code?: string;
+  /**
+   * `dispatch` is the working channel with the responder; `all` was addressed
+   * to the person in the emergency as well and is on their screen right now.
+   */
+  audience?: 'dispatch' | 'all';
   reportType?: 'arrival' | 'field_report' | 'follow_up' | 'resolution_request';
   reportStatus?: 'submitted' | 'reviewed' | 'needs_update' | 'accepted';
 }
@@ -155,6 +162,16 @@ export interface Emergency {
   status: EmergencyStatus;
   userId: string;
   assignedResponderId?: string;
+  /**
+   * When the assigned responder confirmed they are taking it. Absent on a
+   * dispatch nobody has answered yet — assigning a phone is not assigning a
+   * person, and until this is set nobody can say help is on the way.
+   */
+  assignmentAckAt?: string;
+  /** When an unanswered assignment returns to the pending pool by itself. */
+  assignmentDeadlineAt?: string;
+  /** True once an incident has sat unclaimed long enough to need a dispatcher. */
+  dispatchOverdue?: boolean;
   /** Absent while `locationStatus` is `pending`. */
   currentLocation?: GeoPoint;
   locationStatus: EmergencyLocationStatus;
