@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
-import '../../../../core/theme/app_colors.dart';
-import '../../../../core/widgets/app_button.dart';
+import 'package:safealert_ui/safealert_ui.dart';
+import '../../../core/captcha/captcha_field.dart';
+import '../../../core/captcha/captcha_service.dart';
 import '../repository/auth_repository.dart';
 import '../../../core/networking/api_exception.dart';
+import '../widgets/auth_chrome.dart';
 
 class RegistrationStep2Screen extends ConsumerStatefulWidget {
   final Map<String, dynamic> step1Data;
@@ -23,6 +25,13 @@ class _RegistrationStep2ScreenState extends ConsumerState<RegistrationStep2Scree
   bool _loading = false;
   String? _error;
   final _picker = ImagePicker();
+  final _captcha = CaptchaFieldController();
+
+  @override
+  void dispose() {
+    _captcha.dispose();
+    super.dispose();
+  }
 
   Future<void> _pickId() async {
     final picked = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
@@ -52,8 +61,24 @@ class _RegistrationStep2ScreenState extends ConsumerState<RegistrationStep2Scree
       setState(() => _error = 'Please take a live face photo.');
       return;
     }
+    // Answered on the form above, when the deployment draws its own challenge.
+    // A no-op otherwise, so this reads the same either way.
+    if (!_captcha.validate()) return;
     setState(() { _loading = true; _error = null; });
     try {
+      final captcha = ref.read(captchaServiceProvider);
+      var captchaToken = _captcha.token;
+      if (captchaToken == null && await captcha.mode() == CaptchaMode.webview) {
+        // A hosted provider: its widget cannot live on the form, so it opens
+        // here instead.
+        if (!mounted) return;
+        captchaToken = await captcha.solve(context);
+        if (captchaToken == null) {
+          setState(() => _error = 'Security check cancelled. Please try again.');
+          return;
+        }
+      }
+
       final repo = ref.read(authRepositoryProvider);
       final d = widget.step1Data;
       await repo.registerUser(
@@ -70,9 +95,15 @@ class _RegistrationStep2ScreenState extends ConsumerState<RegistrationStep2Scree
         barangay: d['barangay'] as String?,
         proofOfResidency: _idFile!,
         faceCapture: _faceFile!,
+        captchaToken: captchaToken,
+        consentVersion: d['consentVersion'] as String?,
+        consentScopes: d['consentScopes'] as String?,
       );
       if (mounted) context.go('/pending');
     } on ApiException catch (e) {
+      // The challenge is spent whether or not it was read correctly, so a
+      // rejected one has to be replaced before they can try again.
+      if (e.isCaptchaFailure) _captcha.refresh();
       setState(() => _error = e.message);
     } catch (_) {
       setState(() => _error = 'Registration failed. Please try again.');
@@ -83,76 +114,94 @@ class _RegistrationStep2ScreenState extends ConsumerState<RegistrationStep2Scree
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Create Account'),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(4),
-          child: LinearProgressIndicator(
-            value: 1.0,
-            backgroundColor: AppColors.border,
-            color: AppColors.alertRed,
+    return AuthBackdrop(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const AuthStepHeader(step: 2),
+          const SizedBox(height: 16),
+          const TanzAlertAuthHero(
+            eyebrow: 'Resident registration',
+            title: 'Verify it is really you.',
+            description:
+                'A valid ID and a live photo. MDRRMO reviews both before your account opens.',
+            icon: Icons.verified_user_outlined,
           ),
-        ),
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Identity Verification', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 4),
-            const Text('Step 2 of 2 — ID and face capture', style: TextStyle(fontSize: 14, color: AppColors.textMuted)),
-            const SizedBox(height: 24),
-            if (_error != null) ...[
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: AppColors.softRed, borderRadius: BorderRadius.circular(8)),
-                child: Text(_error!, style: const TextStyle(color: AppColors.alertRed)),
-              ),
-              const SizedBox(height: 16),
-            ],
-            _FileUploadCard(
-              title: 'Proof of Residency / Valid ID',
-              subtitle: 'Upload a clear photo of your government-issued ID',
-              file: _idFile,
-              icon: Icons.badge_outlined,
-              onTap: _pickId,
-            ),
+          const SizedBox(height: 18),
+          if (_error != null) ...[
+            AuthErrorBanner(message: _error!),
             const SizedBox(height: 16),
-            _FileUploadCard(
-              title: 'Live Face Photo',
-              subtitle: 'Take a selfie using your front camera',
-              file: _faceFile,
-              icon: Icons.face_retouching_natural,
-              onTap: _captureFace,
-              isCamera: true,
-            ),
-            const SizedBox(height: 24),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppColors.softBlue,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.info_outline, color: AppColors.responderBlue, size: 20),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Your account requires admin approval before you can use TanzAlert. You will be notified once reviewed.',
-                      style: TextStyle(fontSize: 12, color: AppColors.responderBlue),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 24),
-            AppButton(label: 'Submit for Approval', onPressed: _submit, isLoading: _loading),
-            const SizedBox(height: 32),
           ],
-        ),
+          _identityCard(),
+          const SizedBox(height: 16),
+          const AuthNotice(
+            message:
+                'Your account requires admin approval before you can use TanzAlert. '
+                'You will be notified once it has been reviewed.',
+          ),
+          const SizedBox(height: 16),
+          _submitCard(),
+        ],
+      ),
+    );
+  }
+
+  Widget _identityCard() {
+    return TanzAlertPanel(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const TanzAlertSectionHeader(
+            eyebrow: 'Identity',
+            title: 'Proof of residency',
+            description: 'Both are required, and both stay with MDRRMO.',
+          ),
+          const SizedBox(height: 18),
+          _FileUploadCard(
+            title: 'Proof of residency / valid ID',
+            subtitle: 'A clear photo of your government-issued ID',
+            file: _idFile,
+            icon: Icons.badge_outlined,
+            onTap: _pickId,
+          ),
+          const SizedBox(height: 12),
+          _FileUploadCard(
+            title: 'Live face photo',
+            subtitle: 'A selfie taken with your front camera',
+            file: _faceFile,
+            icon: Icons.face_retouching_natural,
+            onTap: _captureFace,
+            isCamera: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _submitCard() {
+    return TanzAlertPanel(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const TanzAlertSectionHeader(
+            eyebrow: 'Final step',
+            title: 'Confirm and submit',
+          ),
+          const SizedBox(height: 16),
+          CaptchaField(
+            controller: _captcha,
+            // Inside a white panel, so the challenge reads as an inset well.
+            background: AppColors.background,
+          ),
+          const SizedBox(height: 18),
+          AppButton(
+            label: 'Submit for approval',
+            onPressed: _submit,
+            isLoading: _loading,
+          ),
+        ],
       ),
     );
   }
@@ -177,58 +226,82 @@ class _FileUploadCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: file != null ? AppColors.successGreen : AppColors.border,
-            width: file != null ? 2 : 1,
+    final done = file != null;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Ink(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: done ? AppColors.softGreen : AppColors.background,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: done ? AppColors.successGreen : AppColors.border,
+            ),
+          ),
+          child: Row(
+            children: [
+              if (done)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.file(
+                    file!,
+                    width: 46,
+                    height: 46,
+                    fit: BoxFit.cover,
+                  ),
+                )
+              else
+                Container(
+                  width: 46,
+                  height: 46,
+                  decoration: BoxDecoration(
+                    color: AppColors.softBlue,
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: Icon(icon, size: 21, color: AppColors.responderBlue),
+                ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13.5,
+                        color: AppColors.textStrong,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      done ? 'Captured - tap to replace' : subtitle,
+                      style: TextStyle(
+                        color: done
+                            ? AppColors.successGreen
+                            : AppColors.textMuted,
+                        fontSize: 12,
+                        fontWeight: done ? FontWeight.w700 : FontWeight.w400,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                done
+                    ? Icons.check_circle
+                    : isCamera
+                    ? Icons.photo_camera_outlined
+                    : Icons.chevron_right,
+                color: done ? AppColors.successGreen : AppColors.textMuted,
+                size: done ? 22 : 20,
+              ),
+            ],
           ),
         ),
-        child: file != null
-            ? Row(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.file(file!, width: 60, height: 60, fit: BoxFit.cover),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                      const SizedBox(height: 4),
-                      const Text('Captured ✓', style: TextStyle(color: AppColors.successGreen, fontSize: 12)),
-                    ],
-                  )),
-                  const Icon(Icons.check_circle, color: AppColors.successGreen),
-                ],
-              )
-            : Row(
-                children: [
-                  Container(
-                    width: 48, height: 48,
-                    decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(8)),
-                    child: Icon(isCamera ? Icons.camera_alt : Icons.upload_file, color: AppColors.textMuted),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                        const SizedBox(height: 2),
-                        Text(subtitle, style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
-                      ],
-                    ),
-                  ),
-                  const Icon(Icons.chevron_right, color: AppColors.textMuted),
-                ],
-              ),
       ),
     );
   }

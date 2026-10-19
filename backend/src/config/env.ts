@@ -29,6 +29,66 @@ const envSchema = z.object({
   // How close counts as "nearly there". Matches nearArrivalRadiusMeters in the
   // responder app, and is loose enough to survive ordinary phone GPS error.
   RESPONDER_NEARBY_METERS: z.coerce.number().int().positive().default(200),
+  // Human check on the resident app's login and registration.
+  //
+  // 'builtin' needs no account and no internet: this backend draws the
+  // challenge and marks the answer itself, which is the only thing that works
+  // when the server answers on a LAN address no provider will ever register.
+  // The hosted providers remain for a deployment with a real domain, and
+  // 'none' switches the check off entirely.
+  CAPTCHA_PROVIDER: z
+    .enum(['builtin', 'none', 'turnstile', 'recaptcha', 'hcaptcha'])
+    .default('builtin'),
+  CAPTCHA_SECRET: z.string().optional(),
+  // Public by design: it is rendered into the challenge page.
+  CAPTCHA_SITE_KEY: z.string().optional(),
+  // When a hosted provider's verifier cannot be reached: true lets the request
+  // through and logs it, false refuses. See captchaGuard for why true is the
+  // default. The builtin challenge never leaves this process, so it is not
+  // affected either way.
+  CAPTCHA_FAIL_OPEN: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+  /*
+    How long a resident's GPS fix is kept before it is erased.
+
+    The consent form every resident reads at registration says one year, so
+    this is the number that promise is made of. 0 switches erasure off and logs
+    a warning at boot, because at that point the app is saying something about
+    this deployment that is not true.
+
+    Only fixes expire. The incident record itself, and the barangay it happened
+    in, outlive this — see retention.sweep.ts for what is erased and what is
+    deliberately kept.
+  */
+  LOCATION_RETENTION_DAYS: z.coerce.number().int().min(0).max(36500).default(365),
+  /*
+    How long a completed transport booking keeps its personal contents.
+
+    Its own window, separate from the location one, because it is a different
+    kind of record: a named patient, their contact and their medical condition,
+    often about somebody who is not the account holder. Set it deliberately —
+    365 here only matches the location window so that switching this on changes
+    nothing by surprise.
+
+    What survives redaction is the operational skeleton: type, status, dates,
+    the unit that went, the barangay, and the timeline. 0 switches transport
+    redaction off without affecting location.
+  */
+  TRANSPORT_RETENTION_DAYS: z.coerce.number().int().min(0).max(36500).default(365),
+  RETENTION_SWEEP_HOURS: z.coerce.number().int().positive().max(168).default(12),
+  /*
+    Counts what the sweep would erase and erases nothing.
+
+    For the first run on a deployment that has been collecting since before the
+    window: the sweep is irreversible, and a dry run is the only way to see what
+    a year's backlog actually amounts to before it goes.
+  */
+  RETENTION_DRY_RUN: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   ADMIN_EMAIL: z.string().email(),
   ADMIN_PASSWORD: z.string().min(8, 'ADMIN_PASSWORD must be at least 8 chars'),
   ADMIN_NAME: z.string().default('TanzAlert Admin'),

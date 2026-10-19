@@ -10,21 +10,12 @@ import { verifyAccessToken } from './modules/auth/jwt.js';
 import type { AuthContext, AuthRole } from './shared/types/http.js';
 import { Responder } from './models/index.js';
 import { emergencyTypesForResponder } from './modules/emergencies/responderRoleAccess.js';
+import { canSubscribeToEmergency } from './modules/emergencies/emergencies.service.js';
 import { startDispatchWatchdog } from './modules/emergencies/dispatch.watchdog.js';
+import { startRetentionSweep } from './modules/retention/index.js';
 
 interface SocketData {
   auth?: AuthContext;
-}
-
-interface LegacyJoinPayload {
-  type: 'user' | 'responder';
-  id: string;
-}
-
-interface ResponderLocationPayload {
-  responderId: string;
-  latitude: number;
-  longitude: number;
 }
 
 async function autoJoinRooms(socket: Socket & { data: SocketData }, auth: AuthContext): Promise<void> {
@@ -71,11 +62,26 @@ async function bootstrap(): Promise<void> {
     },
   });
 
+  /*
+    A socket with no valid token is refused outright.
+
+    It used to be waved through unauthenticated — it joined no rooms, which read
+    as safe, but the handlers below were happy to take instructions from it. An
+    anonymous client has nothing legitimate to do on this namespace, so the
+    cheapest correct answer is not to have one.
+
+    Clients now see `connect_error` and show themselves as offline, which is
+    also an improvement: an expired token used to produce a socket that looked
+    connected and delivered nothing.
+  */
   io.use((socket, next) => {
     const token =
       (socket.handshake.auth as Record<string, unknown>)?.token ??
       socket.handshake.query?.token;
-    if (typeof token !== 'string' || !token) return next();
+    if (typeof token !== 'string' || !token) {
+      next(new Error('UNAUTHENTICATED'));
+      return;
+    }
     try {
       const claims = verifyAccessToken(token);
       (socket.data as SocketData).auth = {
@@ -85,25 +91,39 @@ async function bootstrap(): Promise<void> {
       };
       next();
     } catch {
-      next();
+      next(new Error('UNAUTHENTICATED'));
     }
   });
 
   app.set('io', io);
   startDispatchWatchdog(io);
+  startRetentionSweep();
 
   io.on('connection', (socket: Socket & { data: SocketData }) => {
-    const auth = socket.data.auth;
-    if (auth) {
-      autoJoinRooms(socket, auth).catch((err) => {
-        console.error('Failed to join socket rooms:', err);
-      });
-    }
+    // Guaranteed by the handshake check above.
+    const auth = socket.data.auth!;
+    autoJoinRooms(socket, auth).catch((err) => {
+      console.error('Failed to join socket rooms:', err);
+    });
+
+    // Enough for a session's worth of honest subscriptions, far too few to
+    // sweep ObjectIds looking for incidents that are not yours.
+    let joinBudget = 60;
 
     socket.on('join:emergency', (emergencyId: unknown) => {
-      if (typeof emergencyId === 'string' && /^[a-f\d]{24}$/i.test(emergencyId)) {
-        socket.join(`emergency:${emergencyId}`);
+      if (typeof emergencyId !== 'string' || !/^[a-f\d]{24}$/i.test(emergencyId)) {
+        return;
       }
+      if (joinBudget <= 0) return;
+      joinBudget -= 1;
+
+      canSubscribeToEmergency(auth, emergencyId)
+        .then((allowed) => {
+          if (allowed) socket.join(`emergency:${emergencyId}`);
+        })
+        .catch((err) => {
+          console.error('join:emergency check failed:', err);
+        });
     });
 
     socket.on('leave:emergency', (emergencyId: unknown) => {
@@ -112,18 +132,12 @@ async function bootstrap(): Promise<void> {
       }
     });
 
-    socket.on('join', (data: LegacyJoinPayload) => {
-      socket.join(data.type);
-      socket.join(data.id);
-    });
-
-    socket.on('responderLocation', (data: ResponderLocationPayload) => {
-      io.to('user').emit('responderLocationUpdate', data);
-    });
-
-    socket.on('alert:refresh', (data: unknown) => {
-      io.emit('alert:updated', data);
-    });
+    /*
+      Removed with this change: `join`, which joined any room a caller named and
+      so handed out `admin:live`; `alert:refresh`, which re-broadcast arbitrary
+      payloads to every connected client; and `responderLocation`, a relay into
+      a room called `user`. None of the three apps emitted any of them.
+    */
 
     socket.on('disconnect', () => {
       console.log(`Socket disconnected: ${socket.id}`);

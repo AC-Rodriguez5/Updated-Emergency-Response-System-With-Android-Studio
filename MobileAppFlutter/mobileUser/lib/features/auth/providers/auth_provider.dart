@@ -57,6 +57,7 @@ class AuthNotifier extends ChangeNotifier {
     required String email,
     required String password,
     bool rememberMe = false,
+    String? captchaToken,
   }) async {
     _emit(AuthLoading());
     try {
@@ -64,6 +65,7 @@ class AuthNotifier extends ChangeNotifier {
         email: email,
         password: password,
         rememberMe: rememberMe,
+        captchaToken: captchaToken,
       );
       final user = result.user;
       if (user.approvalStatus == 'approved' && user.isApproved) {

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
+import '../../features/auth/repository/auth_repository.dart';
 import '../config/app_config.dart';
 import '../storage/secure_storage.dart';
 
@@ -41,9 +42,15 @@ class IncidentEvent {
 /// exists for the life of the session is the difference between a channel and
 /// a screen that sometimes listens.
 class IncidentSocket {
-  IncidentSocket(this._storage);
+  IncidentSocket(this._storage, {Future<void> Function()? refreshSession})
+    : _refreshSession = refreshSession;
 
   final SecureStorageService _storage;
+
+  /// Makes one authenticated HTTP call, which is how an expired access token
+  /// gets refreshed — the API client swaps it on a 401 and writes the new pair
+  /// to storage, where [connect] will pick it up.
+  final Future<void> Function()? _refreshSession;
 
   static const List<String> _events = [
     'emergency.created',
@@ -70,6 +77,8 @@ class IncidentSocket {
 
   io.Socket? _socket;
   bool _connected = false;
+  Timer? _reauth;
+  int _attempt = 0;
 
   Stream<IncidentEvent> get events => _events$.stream;
 
@@ -94,9 +103,15 @@ class IncidentSocket {
     );
     _socket = socket;
 
-    socket.onConnect((_) => _setConnected(true));
+    socket.onConnect((_) {
+      _attempt = 0;
+      _setConnected(true);
+    });
     socket.onDisconnect((_) => _setConnected(false));
-    socket.onConnectError((_) => _setConnected(false));
+    // A refused handshake is usually an access token that aged out mid-shift.
+    // Socket.IO would retry forever with the same stale one, so the token is
+    // renewed before trying again.
+    socket.onConnectError((_) => _scheduleReconnect());
     socket.onError((_) => _setConnected(false));
 
     for (final name in _events) {
@@ -109,9 +124,34 @@ class IncidentSocket {
   }
 
   void disconnect() {
+    _reauth?.cancel();
+    _reauth = null;
+    _attempt = 0;
     _socket?.dispose();
     _socket = null;
     _setConnected(false);
+  }
+
+  /// Renews the session, then reconnects, backing off so a backend that is
+  /// simply down is not hammered.
+  void _scheduleReconnect() {
+    _setConnected(false);
+    if (_reauth != null) return;
+
+    const backoff = [3, 5, 10, 20, 30];
+    final seconds = backoff[_attempt < backoff.length ? _attempt : backoff.length - 1];
+    _attempt++;
+
+    _reauth = Timer(Duration(seconds: seconds), () async {
+      _reauth = null;
+      try {
+        await _refreshSession?.call();
+      } catch (_) {
+        // Still worth reconnecting: the old token may yet be valid and the
+        // failure may have been the network rather than the credentials.
+      }
+      await connect();
+    });
   }
 
   void _setConnected(bool value) {
@@ -128,7 +168,10 @@ class IncidentSocket {
 }
 
 final incidentSocketProvider = Provider<IncidentSocket>((ref) {
-  final socket = IncidentSocket(ref.read(secureStorageProvider));
+  final socket = IncidentSocket(
+    ref.read(secureStorageProvider),
+    refreshSession: () => ref.read(authRepositoryProvider).getMe(),
+  );
   ref.onDispose(socket.dispose);
   return socket;
 });

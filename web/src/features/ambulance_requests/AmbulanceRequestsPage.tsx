@@ -129,7 +129,7 @@ export default function AmbulanceRequestsPage() {
   });
 
   const activeResponders = useMemo(() => {
-    const pickupCoordinates = selected?.pickupLocation.coordinates;
+    const pickupCoordinates = selected?.pickupLocation?.coordinates;
     return (responders ?? [])
       .filter(isAssignableResponder)
       .map((responder) => ({
@@ -144,7 +144,7 @@ export default function AmbulanceRequestsPage() {
         if (b.distanceKm === null) return -1;
         return a.distanceKm - b.distanceKm;
       });
-  }, [responders, selected?.pickupLocation.coordinates]);
+  }, [responders, selected?.pickupLocation?.coordinates]);
 
   const selectedResponderDetails =
     activeResponders.find(({ responder }) => responder._id === selectedResponder) ?? null;
@@ -263,8 +263,11 @@ export default function AmbulanceRequestsPage() {
   };
 
   if (selected) {
-    const pickup = selected.pickupLocation.coordinates;
-    const drop = selected.dropOffLocation.coordinates;
+    // A booking past its retention window keeps its skeleton and loses its
+    // personal contents, so every one of these can be absent.
+    const pickup = selected.pickupLocation?.coordinates;
+    const drop = selected.dropOffLocation?.coordinates;
+    const redacted = Boolean(selected.personalDataRedactedAt);
     return (
       <AdminShell
         title="Ambulance Request Detail"
@@ -412,11 +415,18 @@ export default function AmbulanceRequestsPage() {
                 </span>
               </div>
               <dl className="space-y-3">
-                <Row label="Patient name" value={selected.patient.fullName} />
-                <Row label="Contact" value={selected.patient.contactNumber} />
-                <Row label="Address" value={selected.patient.address} />
-                <Row label="Condition" value={selected.patient.medicalCondition} />
-                {selected.patient.specialRequirements && <Row label="Special req." value={selected.patient.specialRequirements} />}
+                {redacted && (
+                  <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                    Personal details were erased on{' '}
+                    {new Date(selected.personalDataRedactedAt!).toLocaleDateString()} under
+                    the data retention policy. The record of the transport itself is kept.
+                  </p>
+                )}
+                <Row label="Patient name" value={selected.patient?.fullName} />
+                <Row label="Contact" value={selected.patient?.contactNumber} />
+                <Row label="Address" value={selected.patient?.address} />
+                <Row label="Condition" value={selected.patient?.medicalCondition} />
+                {selected.patient?.specialRequirements && <Row label="Special req." value={selected.patient.specialRequirements} />}
                 {selected.accompanyingPerson && <Row label="Accompanying" value={`${selected.accompanyingPerson.fullName} · ${selected.accompanyingPerson.contactNumber}`} />}
                 {selected.requestedDate && <Row label="Requested date" value={selected.requestedDate} />}
                 {selected.requestedTime && <Row label="Requested time" value={selected.requestedTime} />}
@@ -431,13 +441,13 @@ export default function AmbulanceRequestsPage() {
               dialog is open -- nothing to float, and no hidden map holding tile
               requests open behind the overlay.
             */}
-            {!dialogOpen && (
+            {!dialogOpen && pickup && drop && (
             <div className="isolate bg-white rounded-2xl border border-slate-200 overflow-hidden">
               <div className="p-4 border-b border-slate-100">
                 <h2 className="font-bold text-slate-900 text-sm">Route Map</h2>
                 <p className="text-xs text-slate-500 mt-1">
-                  <span className="inline-flex items-center gap-1.5"><Circle className="h-2.5 w-2.5 fill-green-500 text-green-500" /> Pickup: {selected.pickupLocation.addressLabel}</span><br />
-                  <span className="inline-flex items-center gap-1.5"><Circle className="h-2.5 w-2.5 fill-red-500 text-red-500" /> Drop-off: {selected.dropOffLocation.addressLabel}</span>
+                  <span className="inline-flex items-center gap-1.5"><Circle className="h-2.5 w-2.5 fill-green-500 text-green-500" /> Pickup: {selected.pickupLocation?.addressLabel}</span><br />
+                  <span className="inline-flex items-center gap-1.5"><Circle className="h-2.5 w-2.5 fill-red-500 text-red-500" /> Drop-off: {selected.dropOffLocation?.addressLabel}</span>
                 </p>
               </div>
               <div style={{ height: 240 }}>
@@ -449,10 +459,10 @@ export default function AmbulanceRequestsPage() {
                 >
                   <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                   <Marker position={[pickup[1], pickup[0]]} icon={pickupIcon}>
-                    <Popup>Pickup: {selected.pickupLocation.addressLabel}</Popup>
+                    <Popup>Pickup: {selected.pickupLocation?.addressLabel}</Popup>
                   </Marker>
                   <Marker position={[drop[1], drop[0]]} icon={dropIcon}>
-                    <Popup>Drop-off: {selected.dropOffLocation.addressLabel}</Popup>
+                    <Popup>Drop-off: {selected.dropOffLocation?.addressLabel}</Popup>
                   </Marker>
                 </MapContainer>
               </div>
@@ -671,9 +681,9 @@ export default function AmbulanceRequestsPage() {
                         {req.isEmergencyPriority && <AlertIcon small />}{req.requestType}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-slate-900 font-medium">{req.patient.fullName}</td>
+                    <td className="px-6 py-4 text-slate-900 font-medium">{req.patient?.fullName ?? '—'}</td>
                     <td className="px-6 py-4 text-slate-500">{req.senderSnapshot?.fullName ?? '—'}</td>
-                    <td className="px-6 py-4 text-slate-500 text-xs max-w-[140px] truncate">{req.pickupLocation.addressLabel}</td>
+                    <td className="px-6 py-4 text-slate-500 text-xs max-w-[140px] truncate">{req.pickupLocation?.addressLabel ?? '—'}</td>
                     <td className="px-6 py-4 text-slate-500 text-xs">
                       {req.requestedDate ? `${req.requestedDate.slice(0, 10)} ${req.requestedTime ?? ''}` : '—'}
                     </td>

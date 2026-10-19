@@ -92,6 +92,14 @@ export interface IEmergency extends Document {
   locationStatus: EmergencyLocationStatus;
   locationRevision: number;
   locationFirstFixAt?: Date;
+  /**
+   * When the retention sweep erased this incident's coordinates.
+   *
+   * Set so an old incident with no position reads as erased on schedule rather
+   * than as one where the fix never arrived. `locationStatus` is left as it
+   * was: it describes what happened during the incident, which is still true.
+   */
+  locationRedactedAt?: Date;
   lastLocationAt?: Date;
   trackingActive: boolean;
   isInsideTanza: boolean;
@@ -219,6 +227,7 @@ const emergencySchema = new Schema<IEmergency>(
     },
     locationRevision: { type: Number, default: 0, min: 0, required: true },
     locationFirstFixAt: { type: Date },
+    locationRedactedAt: { type: Date },
     lastLocationAt: { type: Date },
     // True while the hardware button should keep streaming its position. Cleared
     // when the incident is resolved or cancelled, which is how the device learns

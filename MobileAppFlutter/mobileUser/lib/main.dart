@@ -13,6 +13,7 @@ import 'core/storage/secure_storage.dart';
 import 'core/theme/app_theme.dart';
 import 'core/routing/app_router.dart';
 import 'features/auth/providers/auth_provider.dart';
+import 'features/auth/repository/auth_repository.dart';
 import 'features/ble_panic_button/service/ble_service.dart';
 import 'features/emergency/providers/emergency_provider.dart';
 
@@ -43,6 +44,8 @@ class _TanzAlertAppState extends ConsumerState<TanzAlertApp>
     with WidgetsBindingObserver {
   StreamSubscription? _syncSub;
   io.Socket? _emergencySocket;
+  Timer? _socketRenewal;
+  int _socketAttempt = 0;
   bool _startingEmergencySession = false;
 
   @override
@@ -62,6 +65,7 @@ class _TanzAlertAppState extends ConsumerState<TanzAlertApp>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _syncSub?.cancel();
+    _socketRenewal?.cancel();
     _disconnectEmergencySocket();
     super.dispose();
   }
@@ -141,6 +145,11 @@ class _TanzAlertAppState extends ConsumerState<TanzAlertApp>
     );
     _emergencySocket = socket;
 
+    // The server refuses a handshake carrying an expired access token, and
+    // Socket.IO would keep presenting the same one. One authenticated call
+    // renews it; then reconnect with what is now in storage.
+    socket.onConnectError((_) => _renewAndReconnect());
+
     void refreshFromEvent(dynamic data) {
       final emergencyId =
           _eventString(data, 'emergencyId') ??
@@ -175,6 +184,7 @@ class _TanzAlertAppState extends ConsumerState<TanzAlertApp>
       socket.on(event, refreshFromEvent);
     }
     socket.onConnect((_) {
+      _socketAttempt = 0;
       unawaited(ref.read(emergencyProvider.notifier).loadActiveEmergency());
     });
   }
@@ -182,6 +192,30 @@ class _TanzAlertAppState extends ConsumerState<TanzAlertApp>
   String? _eventString(dynamic data, String key) {
     if (data is Map && data[key] != null) return data[key].toString();
     return null;
+  }
+
+  /// Backs off, renews the session, and reconnects. Shared by both failure
+  /// paths so a backend that is simply down is not hammered.
+  void _renewAndReconnect() {
+    if (_socketRenewal != null) return;
+    const backoff = [3, 5, 10, 20, 30];
+    final seconds = backoff[_socketAttempt < backoff.length
+        ? _socketAttempt
+        : backoff.length - 1];
+    _socketAttempt++;
+
+    _socketRenewal = Timer(Duration(seconds: seconds), () async {
+      _socketRenewal = null;
+      if (!mounted) return;
+      try {
+        await ref.read(authRepositoryProvider).getMe();
+      } catch (_) {
+        // The old token may still be good and the network may have been the
+        // problem, so reconnecting is still worth a try.
+      }
+      _disconnectEmergencySocket();
+      await _connectEmergencySocket();
+    });
   }
 
   void _disconnectEmergencySocket() {

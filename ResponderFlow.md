@@ -69,7 +69,11 @@ joins rooms by role (`backend/src/server.ts:29`):
 | responder | `responder:<id>`, plus `responder-feed:<type>` for every type their role covers |
 | admin | `admin:live` |
 
-Anyone can additionally `join:emergency` for one incident room (`emergency:<id>`).
+A socket without a valid access token is refused at the handshake — there is nothing an
+anonymous client should be listening to here. `join:emergency` is allowed for one incident
+room (`emergency:<id>`) only after `canSubscribeToEmergency` says the caller is party to it:
+the reporting resident, the assigned responder, a responder whose role covers an open
+incident, or a dispatcher. Joins are budgeted per socket so ids cannot be swept for.
 
 The responder app holds **one socket for the session** (`core/realtime/incident_socket.dart`),
 connected when the responder signs in rather than when a particular screen opens. It used to
@@ -445,14 +449,12 @@ Honest list of places where the parts do not line up. None of these break the ma
    "on duty" while the dashboard shows the responder as off duty.
 3. **The field report sends no `reportType`.** The app concatenates its three fields into
    one `note`; the backend accepts an optional `reportType` that nothing populates.
-4. **A legacy socket relay remains.** `socket.on('responderLocation')` rebroadcasts to a
-   room literally named `user` (`server.ts:118`) — no current client emits or listens to it.
-5. **A stale web responder console is still in the tree.** `web/src/App.tsx`,
+4. **A stale web responder console is still in the tree.** `web/src/App.tsx`,
    `pages/ResponderLogin.tsx` and `pages/ResponderDashboard.tsx` are an older browser-based
    responder surface that nothing mounts — `web/src/main.tsx` renders `app/App.tsx`, the
    admin dashboard. It even keeps its own token under a different key (`responderToken`).
    Dead code, but it reads as a second responder client if you go looking.
-6. **Report deduplication is time-based.** An identical note from the same responder within
+5. **Report deduplication is time-based.** An identical note from the same responder within
    10 s is silently dropped and the existing incident returned
    (`emergencies.service.ts:454`) — a retry after a network blip is safe, but a genuine
    repeated note inside that window is lost.

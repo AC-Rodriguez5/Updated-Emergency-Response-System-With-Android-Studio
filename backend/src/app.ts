@@ -10,7 +10,7 @@ import {
   notFoundHandler,
 } from './shared/middleware/index.js';
 
-import { authRoutes } from './modules/auth/index.js';
+import { authRoutes, captchaPageRoutes } from './modules/auth/index.js';
 import {
   adminApprovalsRoutes,
   adminAuditRoutes,
@@ -80,6 +80,7 @@ export function createApp(): Express {
   });
 
   app.use('/api/auth', authRoutes);
+  app.use('/api/captcha', captchaPageRoutes);
   app.use('/api/admin', adminApprovalsRoutes);
   app.use('/api/admin', adminAuditRoutes);
   app.use('/api/admin', adminRespondersRoutes);

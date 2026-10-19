@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { CONSENT_SCOPES } from '../../shared/consent.js';
+
 const BLOOD_TYPES = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'] as const;
 
 export const registerUserSchema = z.object({
@@ -19,6 +21,33 @@ export const registerUserSchema = z.object({
   bloodType: z.enum(BLOOD_TYPES),
   emergencyContactName: z.string().trim().min(2).max(120),
   emergencyContactNumber: z.string().trim().min(7).max(20),
+  /** Solved challenge, when the deployment requires one. */
+  captchaToken: z.string().trim().min(10).max(5000).optional(),
+  /*
+    What the resident agreed to on the consent form, and under which wording.
+
+    Two flat fields rather than one object: registration is posted as multipart
+    so the app can attach its ID photos, and multipart has no way to carry a
+    nested one. Unknown scope names are dropped rather than rejected — an app
+    one version ahead must not be able to fail a registration, and a name this
+    server does not know is a name it cannot honour either.
+  */
+  consentVersion: z.string().trim().min(1).max(20).optional(),
+  consentScopes: z
+    .string()
+    .trim()
+    .max(500)
+    .optional()
+    .transform((raw) =>
+      raw
+        ? raw
+            .split(',')
+            .map((scope) => scope.trim())
+            .filter((scope): scope is (typeof CONSENT_SCOPES)[number] =>
+              (CONSENT_SCOPES as readonly string[]).includes(scope),
+            )
+        : undefined,
+    ),
 });
 
 export type RegisterUserInput = z.infer<typeof registerUserSchema>;
@@ -47,6 +76,8 @@ export const loginSchema = z
     email: z.string().trim().toLowerCase().email(),
     password: z.string().min(1).max(200),
     role: z.enum(['user', 'responder', 'admin']).optional(),
+    /** Solved challenge, when the deployment requires one. */
+    captchaToken: z.string().trim().min(10).max(5000).optional(),
   })
   .strict();
 

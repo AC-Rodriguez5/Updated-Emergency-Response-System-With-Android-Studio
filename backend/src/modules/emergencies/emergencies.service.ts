@@ -306,6 +306,45 @@ function withoutInternalNotes<T extends Record<string, unknown>>(
   };
 }
 
+/**
+ * Whether this account may listen to one incident's realtime room.
+ *
+ * The same rule `loadAccessible` applies to reading an incident over HTTP, in a
+ * form the socket layer can ask before it hands out a subscription. It has to
+ * exist separately because a room join never goes through a route: without it,
+ * knowing an ObjectId was enough to receive a stranger's name, phone number and
+ * live coordinates.
+ */
+export async function canSubscribeToEmergency(
+  auth: AuthContext,
+  emergencyId: string,
+): Promise<boolean> {
+  // The lookup comes first for everyone, dispatchers included: subscribing to
+  // an incident that does not exist is never right, and letting it through
+  // leaves a client collecting rooms that will never carry an event.
+  const doc = await Emergency.findById(emergencyId)
+    .select('userId assignedResponderId type status')
+    .lean();
+  if (!doc) return false;
+
+  if (auth.role === 'admin') return true;
+
+  if (auth.role === 'user') return doc.userId.toString() === auth.accountId;
+
+  if (auth.role === 'responder') {
+    if (doc.assignedResponderId?.toString() === auth.accountId) return true;
+    // An incident nobody assigned them is readable only while it is open and
+    // only if it is theirs to answer.
+    if (!ACTIVE_STATUSES.includes(doc.status)) return false;
+    const responder = await Responder.findById(auth.accountId)
+      .select('responderRole department agencyType')
+      .lean();
+    return !!responder && canResponderHandleEmergency(responder, doc.type);
+  }
+
+  return false;
+}
+
 export async function getOne(id: string, auth: AuthContext) {
   const doc = await loadAccessible(id, auth);
   const json = withoutInternalNotes(doc.toJSON() as Record<string, unknown>, auth.role);
