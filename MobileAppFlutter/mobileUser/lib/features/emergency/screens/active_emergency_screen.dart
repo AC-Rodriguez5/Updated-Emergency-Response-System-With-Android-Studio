@@ -13,6 +13,7 @@ import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/status_badge.dart';
 import '../models/emergency_model.dart';
 import '../providers/emergency_provider.dart';
+import '../../auth/repository/auth_repository.dart';
 import '../repository/emergency_repository.dart';
 
 class ActiveEmergencyScreen extends ConsumerStatefulWidget {
@@ -34,6 +35,7 @@ class _ActiveEmergencyScreenState extends ConsumerState<ActiveEmergencyScreen> {
   bool _cancelling = false;
   bool _sendingMessage = false;
   bool _reloading = false;
+  Timer? _socketRenewal;
   bool _socketConnected = false;
 
   @override
@@ -86,6 +88,23 @@ class _ActiveEmergencyScreenState extends ConsumerState<ActiveEmergencyScreen> {
         });
   }
 
+  /// Renews the session once, then rebuilds the socket with the fresh token.
+  void _renewAndReconnect() {
+    if (_socketRenewal != null || !mounted) return;
+    _socketRenewal = Timer(const Duration(seconds: 5), () async {
+      _socketRenewal = null;
+      if (!mounted) return;
+      try {
+        await ref.read(authRepositoryProvider).getMe();
+      } catch (_) {
+        // Reconnect anyway; the failure may have been the network.
+      }
+      if (!mounted) return;
+      _socket?.dispose();
+      await _connectSocket();
+    });
+  }
+
   Future<void> _connectSocket() async {
     final token = await ref.read(secureStorageProvider).getAccessToken();
     _socket = io.io(
@@ -106,6 +125,9 @@ class _ActiveEmergencyScreenState extends ConsumerState<ActiveEmergencyScreen> {
     });
     _socket!.onConnectError((_) {
       if (mounted) setState(() => _socketConnected = false);
+      // A refused handshake here is an aged-out access token: renew it through
+      // the API client and reconnect, rather than retrying the same one.
+      _renewAndReconnect();
     });
     _socket!.onError((_) {
       if (mounted) setState(() => _socketConnected = false);
@@ -181,6 +203,7 @@ class _ActiveEmergencyScreenState extends ConsumerState<ActiveEmergencyScreen> {
   @override
   void dispose() {
     _locationSub?.cancel();
+    _socketRenewal?.cancel();
     _socket?.disconnect();
     super.dispose();
   }

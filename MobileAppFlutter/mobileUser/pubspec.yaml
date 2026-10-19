@@ -64,6 +64,10 @@ dependencies:
   # Permissions
   permission_handler: ^11.3.1
 
+  # Human check in front of sign-in and registration (renders the provider's
+  # widget over a page the backend serves).
+  webview_flutter: ^4.10.0
+
   # Utilities
   intl: ^0.19.0
   url_launcher: ^6.3.1

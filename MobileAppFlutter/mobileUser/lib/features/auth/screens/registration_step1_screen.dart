@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import '../../../../core/theme/app_colors.dart';
-import '../../../../core/widgets/app_button.dart';
-import '../../../../core/widgets/app_input.dart';
+import 'package:safealert_ui/safealert_ui.dart';
+import '../widgets/auth_chrome.dart';
+import '../widgets/consent_sheet.dart';
 
 const _tanzaBarangays = [
   'Amaya I', 'Amaya II', 'Amaya III', 'Amaya IV', 'Amaya V', 'Amaya VI',
@@ -41,7 +41,8 @@ class _RegistrationStep1ScreenState extends State<RegistrationStep1Screen> {
   String? _bloodType;
   DateTime? _dob;
   bool _obscure = true;
-  bool _consent = false;
+  ConsentDecision? _consent;
+  bool _consentMissing = false;
 
   @override
   void dispose() {
@@ -69,7 +70,21 @@ class _RegistrationStep1ScreenState extends State<RegistrationStep1Screen> {
     }
   }
 
+  Future<void> _openConsent() async {
+    final decision = await showConsentSheet(context, current: _consent);
+    if (!mounted || decision == null) return;
+    setState(() {
+      _consent = decision;
+      _consentMissing = false;
+    });
+  }
+
   void _next() {
+    final consented = _consent?.isComplete ?? false;
+    // Said beside the checkbox rather than in a snackbar: this is the foot of
+    // a long form, and a message that slides in over the keyboard and leaves
+    // again is the easiest thing on the page to miss.
+    setState(() => _consentMissing = !consented);
     if (!_formKey.currentState!.validate()) return;
     if (_dob == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -83,12 +98,7 @@ class _RegistrationStep1ScreenState extends State<RegistrationStep1Screen> {
       );
       return;
     }
-    if (!_consent) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please accept consent to location sharing.')),
-      );
-      return;
-    }
+    if (!consented) return;
     context.push('/register/step2', extra: {
       'name': _nameCtrl.text.trim(),
       'email': _emailCtrl.text.trim().toLowerCase(),
@@ -101,186 +111,287 @@ class _RegistrationStep1ScreenState extends State<RegistrationStep1Screen> {
       'bloodType': _bloodType!,
       'emergencyContactName': _ecNameCtrl.text.trim(),
       'emergencyContactNumber': _ecNumberCtrl.text.trim(),
+      // Recorded against the account in step 2: the form says in writing that
+      // it will be, with the version of the wording that was agreed to.
+      'consentVersion': _consent!.version,
+      'consentScopes': _consent!.wireScopes,
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Create Account'),
-        leading: const BackButton(),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(4),
-          child: LinearProgressIndicator(
-            value: 0.5,
-            backgroundColor: AppColors.border,
-            color: AppColors.alertRed,
-          ),
-        ),
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Personal Information', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 4),
-              const Text('Step 1 of 2 — Basic details', style: TextStyle(fontSize: 14, color: AppColors.textMuted)),
-              const SizedBox(height: 24),
-              AppInput(
-                label: 'Full name',
-                controller: _nameCtrl,
-                validator: (v) => v == null || v.trim().isEmpty ? 'Full name is required' : null,
-              ),
-              const SizedBox(height: 16),
-              AppInput(
-                label: 'Email address',
-                controller: _emailCtrl,
-                keyboardType: TextInputType.emailAddress,
-                validator: (v) => v == null || !v.contains('@') ? 'Enter a valid email' : null,
-              ),
-              const SizedBox(height: 16),
-              AppInput(
-                label: 'Mobile number',
-                controller: _phoneCtrl,
-                keyboardType: TextInputType.phone,
-                validator: (v) => v == null || v.trim().length < 7 ? 'Enter a valid phone number' : null,
-              ),
-              const SizedBox(height: 16),
-              AppInput(
-                label: 'Password',
-                controller: _passCtrl,
-                obscureText: _obscure,
-                suffix: IconButton(
-                  icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility),
-                  onPressed: () => setState(() => _obscure = !_obscure),
-                ),
-                validator: (v) => v == null || v.length < 8 ? 'Password must be at least 8 characters' : null,
-              ),
-              const SizedBox(height: 16),
-              AppInput(
-                label: 'Confirm password',
-                controller: _confirmCtrl,
-                obscureText: true,
-                validator: (v) => v != _passCtrl.text ? 'Passwords do not match' : null,
-              ),
-              const SizedBox(height: 24),
-              const Text('Personal Details', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 12),
-              AppInput(
-                label: 'Date of birth',
-                controller: _dobCtrl,
-                readOnly: true,
-                onTap: _pickDob,
-                suffix: const Icon(Icons.calendar_today, size: 18),
-                validator: (v) => v == null || v.isEmpty ? 'Select your date of birth' : null,
-              ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                initialValue: _bloodType,
-                decoration: const InputDecoration(labelText: 'Blood type'),
-                hint: const Text('Select blood type'),
-                items: _bloodTypes
-                    .map((b) => DropdownMenuItem(value: b, child: Text(b)))
-                    .toList(),
-                onChanged: (v) => setState(() => _bloodType = v),
-                validator: (v) => v == null || v.isEmpty ? 'Select your blood type' : null,
-              ),
-              const SizedBox(height: 24),
-              const Text('Location', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: _municipality,
-                decoration: const InputDecoration(labelText: 'Municipality / City'),
-                items: const [
-                  DropdownMenuItem(value: 'Tanza', child: Text('Tanza (Primary)')),
-                  DropdownMenuItem(value: 'Other', child: Text('Other (Outside coverage)')),
-                ],
-                onChanged: (v) => setState(() => _municipality = v ?? 'Tanza'),
-              ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                initialValue: _barangay,
-                decoration: const InputDecoration(labelText: 'Barangay'),
-                hint: const Text('Select barangay'),
-                items: _tanzaBarangays.map((b) => DropdownMenuItem(value: b, child: Text(b))).toList(),
-                onChanged: (v) => setState(() => _barangay = v),
-                validator: (v) => v == null || v.isEmpty ? 'Select your barangay' : null,
-              ),
-              const SizedBox(height: 16),
-              AppInput(
-                label: 'Street address',
-                controller: _streetCtrl,
-                validator: (v) =>
-                    v == null || v.trim().length < 2 ? 'Street address is required' : null,
-              ),
-              const SizedBox(height: 24),
-              const Text('Emergency Contact', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 12),
-              AppInput(
-                label: 'Contact name',
-                controller: _ecNameCtrl,
-                validator: (v) =>
-                    v == null || v.trim().length < 2 ? 'Emergency contact name is required' : null,
-              ),
-              const SizedBox(height: 16),
-              AppInput(
-                label: 'Contact number',
-                controller: _ecNumberCtrl,
-                keyboardType: TextInputType.phone,
-                validator: (v) =>
-                    v == null || v.trim().length < 7 ? 'Enter a valid contact number' : null,
-              ),
-              const SizedBox(height: 24),
-              if (_municipality != 'Tanza')
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFEF3C7),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.warning_amber, color: AppColors.warningAmber),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'TanzAlert primarily serves Tanza Municipality. Outside-Tanza requests require admin review.',
-                          style: TextStyle(fontSize: 12, color: AppColors.warningAmber),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Checkbox(
-                    value: _consent,
-                    onChanged: (v) => setState(() => _consent = v ?? false),
-                    activeColor: AppColors.alertRed,
-                  ),
-                  const Expanded(
-                    child: Padding(
-                      padding: EdgeInsets.only(top: 12),
-                      child: Text(
-                        'I consent to emergency location sharing with Tanza MDRRMO during active emergencies.',
-                        style: TextStyle(fontSize: 13),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              AppButton(label: 'Continue', onPressed: _next),
-              const SizedBox(height: 32),
-            ],
-          ),
+    return AuthBackdrop(
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const AuthStepHeader(step: 1),
+            const SizedBox(height: 16),
+            const TanzAlertAuthHero(
+              eyebrow: 'Resident registration',
+              title: 'Create your TanzAlert account.',
+              description:
+                  'A few details so dispatch knows who needs help, and where to send it.',
+              icon: Icons.how_to_reg_outlined,
+            ),
+            const SizedBox(height: 18),
+            _accountCard(),
+            const SizedBox(height: 16),
+            _aboutYouCard(),
+            const SizedBox(height: 16),
+            _locationCard(),
+            const SizedBox(height: 16),
+            _emergencyContactCard(),
+            const SizedBox(height: 16),
+            ConsentTile(
+              decision: _consent,
+              onTap: _openConsent,
+              error: _consentMissing ? consentCopyEn.tileMissing : null,
+            ),
+            const SizedBox(height: 20),
+            AppButton(label: 'Continue', onPressed: _next, icon: Icons.arrow_forward),
+          ],
         ),
       ),
     );
   }
+
+  Widget _accountCard() {
+    return TanzAlertPanel(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const TanzAlertSectionHeader(
+            eyebrow: 'Account',
+            title: 'Your details',
+          ),
+          const SizedBox(height: 18),
+          AppInput(
+            label: 'Full name',
+            controller: _nameCtrl,
+            prefix: const _FieldIcon(Icons.person_outline),
+            validator: (v) =>
+                v == null || v.trim().isEmpty ? 'Full name is required' : null,
+          ),
+          const SizedBox(height: 14),
+          AppInput(
+            label: 'Email address',
+            controller: _emailCtrl,
+            keyboardType: TextInputType.emailAddress,
+            prefix: const _FieldIcon(Icons.alternate_email),
+            validator: (v) =>
+                v == null || !v.contains('@') ? 'Enter a valid email' : null,
+          ),
+          const SizedBox(height: 14),
+          AppInput(
+            label: 'Mobile number',
+            controller: _phoneCtrl,
+            keyboardType: TextInputType.phone,
+            prefix: const _FieldIcon(Icons.phone_outlined),
+            validator: (v) => v == null || v.trim().length < 7
+                ? 'Enter a valid phone number'
+                : null,
+          ),
+          const SizedBox(height: 14),
+          AppInput(
+            label: 'Password',
+            controller: _passCtrl,
+            obscureText: _obscure,
+            prefix: const _FieldIcon(Icons.lock_outline),
+            suffix: IconButton(
+              tooltip: _obscure ? 'Show password' : 'Hide password',
+              icon: Icon(
+                _obscure ? Icons.visibility_off : Icons.visibility,
+                size: 20,
+              ),
+              onPressed: () => setState(() => _obscure = !_obscure),
+            ),
+            validator: (v) => v == null || v.length < 8
+                ? 'Password must be at least 8 characters'
+                : null,
+          ),
+          const SizedBox(height: 14),
+          AppInput(
+            label: 'Confirm password',
+            controller: _confirmCtrl,
+            obscureText: true,
+            prefix: const _FieldIcon(Icons.lock_reset_outlined),
+            validator: (v) => v != _passCtrl.text ? 'Passwords do not match' : null,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _aboutYouCard() {
+    return TanzAlertPanel(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const TanzAlertSectionHeader(
+            eyebrow: 'Personal',
+            title: 'About you',
+            description: 'Responders are told this on the way to you.',
+          ),
+          const SizedBox(height: 18),
+          AppInput(
+            label: 'Date of birth',
+            controller: _dobCtrl,
+            readOnly: true,
+            onTap: _pickDob,
+            prefix: const _FieldIcon(Icons.cake_outlined),
+            suffix: const Icon(Icons.calendar_today, size: 18),
+            validator: (v) =>
+                v == null || v.isEmpty ? 'Select your date of birth' : null,
+          ),
+          const SizedBox(height: 14),
+          DropdownButtonFormField<String>(
+            initialValue: _bloodType,
+            // Without this a dropdown is as wide as its widest entry, which
+            // overruns the field once a leading icon is taking room.
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Blood type',
+              prefixIcon: _FieldIcon(Icons.bloodtype_outlined),
+            ),
+            hint: const Text('Select blood type'),
+            items: _bloodTypes
+                .map((b) => DropdownMenuItem(value: b, child: Text(b)))
+                .toList(),
+            onChanged: (v) => setState(() => _bloodType = v),
+            validator: (v) =>
+                v == null || v.isEmpty ? 'Select your blood type' : null,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _locationCard() {
+    return TanzAlertPanel(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const TanzAlertSectionHeader(
+            eyebrow: 'Location',
+            title: 'Where you live',
+          ),
+          const SizedBox(height: 18),
+          DropdownButtonFormField<String>(
+            initialValue: _municipality,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Municipality / City',
+              prefixIcon: _FieldIcon(Icons.location_city_outlined),
+            ),
+            items: const [
+              DropdownMenuItem(
+                value: 'Tanza',
+                child: Text('Tanza (Primary)', overflow: TextOverflow.ellipsis),
+              ),
+              DropdownMenuItem(
+                value: 'Other',
+                child: Text(
+                  'Other (Outside coverage)',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+            onChanged: (v) => setState(() => _municipality = v ?? 'Tanza'),
+          ),
+          const SizedBox(height: 14),
+          DropdownButtonFormField<String>(
+            initialValue: _barangay,
+            // 'Barangay III (Poblacion)' does not fit beside an icon.
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Barangay',
+              prefixIcon: _FieldIcon(Icons.map_outlined),
+            ),
+            hint: const Text('Select barangay'),
+            items: _tanzaBarangays
+                .map(
+                  (b) => DropdownMenuItem(
+                    value: b,
+                    child: Text(b, overflow: TextOverflow.ellipsis),
+                  ),
+                )
+                .toList(),
+            onChanged: (v) => setState(() => _barangay = v),
+            validator: (v) =>
+                v == null || v.isEmpty ? 'Select your barangay' : null,
+          ),
+          const SizedBox(height: 14),
+          AppInput(
+            label: 'Street address',
+            controller: _streetCtrl,
+            prefix: const _FieldIcon(Icons.home_outlined),
+            validator: (v) => v == null || v.trim().length < 2
+                ? 'Street address is required'
+                : null,
+          ),
+          if (_municipality != 'Tanza') ...[
+            const SizedBox(height: 14),
+            const AuthNotice(
+              icon: Icons.warning_amber_rounded,
+              tone: AppColors.warningAmber,
+              background: Color(0xFFFEF3C7),
+              message:
+                  'TanzAlert primarily serves Tanza Municipality. Outside-Tanza requests require admin review.',
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _emergencyContactCard() {
+    return TanzAlertPanel(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const TanzAlertSectionHeader(
+            eyebrow: 'In an emergency',
+            title: 'Who we call',
+            description: 'The person dispatch contacts on your behalf.',
+          ),
+          const SizedBox(height: 18),
+          AppInput(
+            label: 'Contact name',
+            controller: _ecNameCtrl,
+            prefix: const _FieldIcon(Icons.contact_emergency_outlined),
+            validator: (v) => v == null || v.trim().length < 2
+                ? 'Emergency contact name is required'
+                : null,
+          ),
+          const SizedBox(height: 14),
+          AppInput(
+            label: 'Contact number',
+            controller: _ecNumberCtrl,
+            keyboardType: TextInputType.phone,
+            prefix: const _FieldIcon(Icons.phone_in_talk_outlined),
+            validator: (v) => v == null || v.trim().length < 7
+                ? 'Enter a valid contact number'
+                : null,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A field's leading icon, at one weight and colour across every form.
+class _FieldIcon extends StatelessWidget {
+  const _FieldIcon(this.icon);
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) =>
+      Icon(icon, size: 20, color: AppColors.textMuted);
 }

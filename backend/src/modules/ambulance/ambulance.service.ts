@@ -127,6 +127,34 @@ export async function createRequest(
     barangay: input.barangay ?? user.barangay,
   };
 
+  /*
+    An emergency is never gated on a dialog.
+
+    For a scheduled or transfer booking the app shows the consent sheet and
+    sends what was agreed. For an emergency it does not ask at all, and this
+    records the basis RA 10173 actually provides for that case: processing
+    necessary to protect life and health. The decision is made here rather than
+    taken from the client, because a client can claim anything.
+
+    A booking that arrives with no consent block at all is an older app, and is
+    left bookable on purpose rather than refused mid-request.
+  */
+  const consent =
+    input.requestType === 'emergency'
+      ? {
+          basis: 'vital_interest' as const,
+          scopes: [],
+          recordedAt: new Date(),
+        }
+      : input.consent
+        ? {
+            basis: 'consent' as const,
+            version: input.consent.version,
+            scopes: input.consent.scopes,
+            recordedAt: new Date(),
+          }
+        : undefined;
+
   const created = await AmbulanceTransportRequest.create({
     requestType: input.requestType,
     status: 'pending_review',
@@ -134,6 +162,7 @@ export async function createRequest(
     senderSnapshot,
     patient: input.patient,
     accompanyingPerson: input.accompanyingPerson,
+    consent,
     pickupLocation: {
       type: 'Point',
       coordinates: input.pickupLocation.coordinates,

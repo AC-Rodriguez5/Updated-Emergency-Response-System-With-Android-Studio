@@ -333,10 +333,17 @@ export interface AmbulanceRequest {
   status: AmbulanceRequestStatus;
   senderUserId: string;
   senderSnapshot?: SenderSnapshot;
-  patient: PatientInfo;
+  /*
+    Absent once the retention sweep has erased a long-finished booking. The
+    skeleton — type, status, dates, unit, barangay, timeline — stays, so a
+    redacted record still renders; everything naming a person does not.
+  */
+  patient?: PatientInfo;
   accompanyingPerson?: { fullName: string; contactNumber: string };
-  pickupLocation: GeoLocationLabeled;
-  dropOffLocation: GeoLocationLabeled;
+  pickupLocation?: GeoLocationLabeled;
+  dropOffLocation?: GeoLocationLabeled;
+  /** When the personal contents were erased, if they have been. */
+  personalDataRedactedAt?: string;
   requestedDate?: string;
   requestedTime?: string;
   transferDetails?: { originHospitalName?: string; destinationHospitalName?: string; referringDoctor?: string };

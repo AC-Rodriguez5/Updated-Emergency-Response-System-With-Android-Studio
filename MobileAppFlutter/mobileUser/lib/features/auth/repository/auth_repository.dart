@@ -20,12 +20,15 @@ class AuthRepository {
     required String email,
     required String password,
     bool rememberMe = false,
+    String? captchaToken,
   }) async {
     try {
       final response = await _dio.post('/auth/login', data: {
         'email': email.trim().toLowerCase(),
         'password': password,
         'role': 'user',
+        if (captchaToken != null && captchaToken.isNotEmpty)
+          'captchaToken': captchaToken,
       });
       final data = (response.data as Map<String, dynamic>)['data'] as Map<String, dynamic>;
       final user = UserModel.fromJson(data);
@@ -50,6 +53,9 @@ class AuthRepository {
     required String bloodType,
     required String emergencyContactName,
     required String emergencyContactNumber,
+    String? captchaToken,
+    String? consentVersion,
+    String? consentScopes,
     required File proofOfResidency,
     required File faceCapture,
     String? municipality,
@@ -76,9 +82,28 @@ class AuthRepository {
       if (barangay != null && barangay.trim().isNotEmpty) {
         fields['barangay'] = barangay.trim();
       }
+      /*
+        Sent as a header, not a field.
+
+        Registration is multipart, and a field can only be read after the
+        server has buffered both photos — by which point the rate limiter has
+        already counted the attempt, so a mistyped code used to cost one of ten
+        registrations an hour. A header is readable before any of that.
+      */
+      // Two flat fields rather than a nested object: this is posted as
+      // multipart, which has no way to carry one.
+      if (consentVersion != null && consentVersion.isNotEmpty) {
+        fields['consentVersion'] = consentVersion;
+      }
+      if (consentScopes != null && consentScopes.isNotEmpty) {
+        fields['consentScopes'] = consentScopes;
+      }
       final response = await _dio.post(
         '/auth/register/user',
         data: FormData.fromMap(fields),
+        options: (captchaToken != null && captchaToken.isNotEmpty)
+            ? Options(headers: {'x-captcha-token': captchaToken})
+            : null,
       );
       final data = (response.data as Map<String, dynamic>)['data']
           as Map<String, dynamic>;
