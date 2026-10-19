@@ -11,6 +11,8 @@ import '../../features/auth/screens/pending_approval_screen.dart';
 import '../../features/auth/screens/registration_screen.dart';
 import '../../features/auth/screens/splash_screen.dart';
 import '../../features/duty_status/screens/duty_status_screen.dart';
+import '../../features/facilities/screens/nearby_facilities_screen.dart';
+import '../../features/history/screens/response_history_screen.dart';
 import '../../features/emergency_map/screens/emergency_map_screen.dart';
 import '../../features/response_reports/screens/report_form_screen.dart';
 import '../../features/route_guidance/screens/route_guidance_screen.dart';
@@ -104,12 +106,35 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           StatefulShellBranch(
             routes: [
               GoRoute(
+                path: '/history',
+                builder: (_, _) => const ResponseHistoryScreen(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
                 path: '/settings',
                 builder: (_, _) => const SettingsScreen(),
               ),
             ],
           ),
         ],
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavigatorKey,
+        path: '/facilities',
+        pageBuilder: (_, state) {
+          final extra = state.extra as Map<String, dynamic>? ?? {};
+          return _page(
+            state,
+            NearbyFacilitiesScreen(
+              lat: (extra['lat'] as num?)?.toDouble() ?? 14.355,
+              lng: (extra['lng'] as num?)?.toDouble() ?? 120.885,
+              emergencyType: extra['type'] as String? ?? 'medical',
+            ),
+          );
+        },
       ),
       GoRoute(
         parentNavigatorKey: _rootNavigatorKey,
@@ -199,6 +224,11 @@ class _ResponderNavigationShell extends StatelessWidget {
           icon: Icon(Icons.emergency_outlined),
           selectedIcon: Icon(Icons.emergency_rounded),
           label: 'Ambulance',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.history_outlined),
+          selectedIcon: Icon(Icons.history_rounded),
+          label: 'History',
         ),
         NavigationDestination(
           icon: Icon(Icons.settings_outlined),

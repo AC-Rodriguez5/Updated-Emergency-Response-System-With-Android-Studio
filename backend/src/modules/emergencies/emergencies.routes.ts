@@ -3,9 +3,12 @@ import type { Server as SocketServer } from 'socket.io';
 import {
   authGuard,
   emergencyCreateLimiter,
+  emergencyMessageLimiter,
   validateRequest,
 } from '../../shared/middleware/index.js';
 import {
+  acknowledgeBodySchema,
+  arrivedBodySchema,
   assignBodySchema,
   cancelBodySchema,
   createEmergencySchema,
@@ -13,6 +16,8 @@ import {
   listActiveQuerySchema,
   listMineQuerySchema,
   onTheWayBodySchema,
+  releaseBodySchema,
+  type ReleaseBody,
   reportBodySchema,
   type AssignBody,
   type CancelBody,
@@ -21,6 +26,8 @@ import {
   type ListActiveQuery,
   type ListMineQuery,
   type ReportBody,
+  userMessageBodySchema,
+  type UserMessageBody,
 } from './emergencies.schemas.js';
 import * as svc from './emergencies.service.js';
 
@@ -60,6 +67,20 @@ router.get(
     try {
       const q = req.validated!.query as ListActiveQuery;
       const data = await svc.listActive(q, req.auth!);
+      res.json({ data });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+router.get(
+  '/history',
+  validateRequest({ query: listMineQuerySchema }),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const q = req.validated!.query as ListMineQuery;
+      const data = await svc.listResolvedForResponder(q, req.auth!);
       res.json({ data });
     } catch (err) {
       next(err);
@@ -140,6 +161,49 @@ router.post(
 );
 
 router.post(
+  '/:id/arrived',
+  validateRequest({ params: idParamSchema, body: arrivedBodySchema }),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { id } = req.validated!.params as IdParam;
+      const data = await svc.setArrived(id, req.auth!, ctxFrom(req));
+      res.json({ data });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+router.post(
+  '/:id/acknowledge',
+  validateRequest({ params: idParamSchema, body: acknowledgeBodySchema }),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { id } = req.validated!.params as IdParam;
+      const data = await svc.acknowledge(id, req.auth!, ctxFrom(req));
+      res.json({ data });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+router.post(
+  '/:id/release',
+  validateRequest({ params: idParamSchema, body: releaseBodySchema }),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { id } = req.validated!.params as IdParam;
+      const body = req.validated!.body as ReleaseBody;
+      const data = await svc.release(id, body, req.auth!, ctxFrom(req));
+      res.json({ data });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+router.post(
   '/:id/report',
   validateRequest({ params: idParamSchema, body: reportBodySchema }),
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -147,6 +211,22 @@ router.post(
       const { id } = req.validated!.params as IdParam;
       const body = req.validated!.body as ReportBody;
       const data = await svc.report(id, body, req.auth!, ctxFrom(req));
+      res.json({ data });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+router.post(
+  '/:id/message',
+  emergencyMessageLimiter,
+  validateRequest({ params: idParamSchema, body: userMessageBodySchema }),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { id } = req.validated!.params as IdParam;
+      const body = req.validated!.body as UserMessageBody;
+      const data = await svc.sendMessage(id, body, req.auth!, ctxFrom(req));
       res.json({ data });
     } catch (err) {
       next(err);

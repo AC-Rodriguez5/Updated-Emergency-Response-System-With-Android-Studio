@@ -36,6 +36,20 @@ export const emergencyCreateLimiter = rateLimit({
     limit: 10,
     keyGenerator: (req) => authedKey(req, 'emergency'),
 });
+// The incident channel. Generous enough that someone adding "gate is locked"
+// then "we moved to the roof" is never blocked, tight enough that a stuck
+// finger cannot bury the dispatcher's notification list mid-incident. Its own
+// key salt keeps it out of the budget for raising a fresh alert.
+//
+// A resident is talking about one emergency; a responder or a dispatcher may be
+// working several at once, tapping one-line updates on each, so they get more
+// room before the same stuck-finger ceiling applies.
+export const emergencyMessageLimiter = rateLimit({
+    ...baseOptions,
+    windowMs: 60 * 1000,
+    limit: (req) => (req.auth?.role === 'user' ? 12 : 40),
+    keyGenerator: (req) => authedKey(req, 'emergency-message'),
+});
 // The panic button streams a fix roughly every 10 s for as long as its incident
 // stays open, and retries after a dropped cellular connection arrive in bursts.
 // This gets its own key salt so a long GPS stream can never exhaust the budget

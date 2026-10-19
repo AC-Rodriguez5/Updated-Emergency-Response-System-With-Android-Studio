@@ -9,6 +9,7 @@ import {
   type EmergencyPriority,
   type EmergencyType,
 } from '../../models/index.js';
+import { env } from '../../config/env.js';
 import { AppError } from '../../shared/middleware/errorHandler.js';
 import { tanzaScope } from '../../shared/utils/tanza.js';
 import type { AuthContext, AuthRole } from '../../shared/types/http.js';
@@ -23,9 +24,11 @@ import type {
   CreateEmergencyInput,
   ListActiveQuery,
   ListMineQuery,
+  ReleaseBody,
   ReportBody,
   RequestUpdateBody,
   ResolveBody,
+  UserMessageBody,
 } from './emergencies.schemas.js';
 
 interface ServiceCtx {
@@ -134,7 +137,7 @@ const ACTIVE_STATUSES: IEmergency['status'][] = [
   'arrived',
 ];
 
-async function setResponderDutyForEmergency(
+export async function setResponderDutyForEmergency(
   responderId: string | undefined,
   dutyStatus: 'available' | 'busy' | 'responding',
   ctx: ServiceCtx,
@@ -191,6 +194,36 @@ export async function listActive(args: ListActiveQuery, auth: AuthContext) {
   return { items, total, page: args.page, limit: args.limit };
 }
 
+/**
+ * What a responder has already closed out.
+ *
+ * Only incidents they were assigned to and that a dispatcher then resolved: a
+ * responder's history is the work they actually did, not every call the
+ * municipality logged that day.
+ */
+export async function listResolvedForResponder(
+  args: ListMineQuery,
+  auth: AuthContext,
+) {
+  if (auth.role !== 'responder') {
+    throw new AppError('Only responders have a response history', 403, 'FORBIDDEN');
+  }
+  const filter = {
+    assignedResponderId: new mongoose.Types.ObjectId(auth.accountId),
+    status: 'resolved' as const,
+  };
+  const skip = (args.page - 1) * args.limit;
+  const [items, total] = await Promise.all([
+    Emergency.find(filter)
+      .sort({ resolvedAt: -1, updatedAt: -1 })
+      .skip(skip)
+      .limit(args.limit)
+      .lean(),
+    Emergency.countDocuments(filter),
+  ]);
+  return { items, total, page: args.page, limit: args.limit };
+}
+
 export async function listMine(args: ListMineQuery, auth: AuthContext) {
   if (auth.role !== 'user') {
     throw new AppError('Only users have a "my" feed', 403, 'FORBIDDEN');
@@ -201,7 +234,10 @@ export async function listMine(args: ListMineQuery, auth: AuthContext) {
     Emergency.find(filter).sort({ createdAt: -1 }).skip(skip).limit(args.limit).lean(),
     Emergency.countDocuments(filter),
   ]);
-  return { items, total, page: args.page, limit: args.limit };
+  const visible = items.map((item) =>
+    withoutInternalNotes(item as unknown as Record<string, unknown>, auth.role),
+  );
+  return { items: visible, total, page: args.page, limit: args.limit };
 }
 
 async function loadAccessible(id: string, auth: AuthContext): Promise<IEmergency> {
@@ -228,9 +264,72 @@ async function loadAccessible(id: string, auth: AuthContext): Promise<IEmergency
   return doc;
 }
 
+/// The slice of an assigned responder that the reporting user is shown while
+/// they wait: who is coming and from which unit.
+///
+/// Name, badge, agency and station only. No phone or email — the app has no
+/// call feature, and an emergency is not a reason to hand out a responder's
+/// personal contact details to everyone who raises an alert.
+const RESPONDER_SUMMARY_FIELDS = 'name badgeId department agencyType stationName';
+
+const AGENCY_LABEL: Record<string, string> = {
+  mdrrmo: 'MDRRMO',
+  pnp: 'PNP',
+  bfp: 'BFP',
+  medical: 'Medical',
+  rescue: 'Rescue',
+  barangay: 'Barangay',
+  other: 'MDRRMO',
+};
+
+interface TimelineJson {
+  audience?: string;
+}
+
+/**
+ * Keeps the dispatch channel away from the person in the emergency.
+ *
+ * Their app can read the whole incident, so filtering has to happen here rather
+ * than in the client: a note marked `dispatch` is between the dispatcher and
+ * the responder, and nothing addressed to them is removed.
+ */
+function withoutInternalNotes<T extends Record<string, unknown>>(
+  json: T,
+  role: AuthRole,
+): T {
+  if (role !== 'user') return json;
+  const timeline = json.timeline;
+  if (!Array.isArray(timeline)) return json;
+  return {
+    ...json,
+    timeline: (timeline as TimelineJson[]).filter((entry) => entry.audience !== 'dispatch'),
+  };
+}
+
 export async function getOne(id: string, auth: AuthContext) {
   const doc = await loadAccessible(id, auth);
-  return doc.toJSON();
+  const json = withoutInternalNotes(doc.toJSON() as Record<string, unknown>, auth.role);
+  if (!doc.assignedResponderId) return json;
+
+  const responder = await Responder.findById(doc.assignedResponderId)
+    .select(RESPONDER_SUMMARY_FIELDS)
+    .lean();
+  // An assignment whose responder record has since gone is not a reason to
+  // fail the whole lookup — the tracking screen falls back to "Responder
+  // assigned" without a name.
+  if (!responder) return json;
+
+  return {
+    ...json,
+    assignedResponder: {
+      id: responder._id.toString(),
+      name: responder.name,
+      badgeId: responder.badgeId,
+      agency: AGENCY_LABEL[responder.agencyType ?? ''] ?? 'MDRRMO',
+      department: responder.department,
+      stationName: responder.stationName,
+    },
+  };
 }
 
 export async function cancel(
@@ -295,8 +394,14 @@ export async function assign(
   }
   const doc = await Emergency.findById(id);
   if (!doc) throw new AppError('Emergency not found', 404, 'NOT_FOUND');
-  if (doc.status !== 'pending') {
-    throw new AppError('Already assigned or closed', 409, 'INVALID_TRANSITION');
+  if (!ACTIVE_STATUSES.includes(doc.status)) {
+    throw new AppError('Emergency is already closed', 409, 'INVALID_TRANSITION');
+  }
+  // A responder may only take what nobody is holding. A dispatcher may take it
+  // off whoever holds it: reassignment is the only way a stalled incident --
+  // flat battery, no signal, wrong unit -- ever reaches somebody else.
+  if (auth.role === 'responder' && doc.status !== 'pending') {
+    throw new AppError('Already assigned', 409, 'INVALID_TRANSITION');
   }
 
   let responderId: string;
@@ -325,10 +430,23 @@ export async function assign(
     );
   }
 
+  const previousResponderId = doc.assignedResponderId?.toString();
+  const isReassignment = !!previousResponderId && previousResponderId !== responderId;
+
   doc.status = 'assigned';
   doc.assignedResponderId = responder._id as mongoose.Types.ObjectId;
+  // Accepting from the feed is itself an acknowledgement. Being assigned is a
+  // request that still has to be answered, so it gets a deadline instead.
+  if (auth.role === 'responder') {
+    doc.assignmentAckAt = new Date();
+    doc.set('assignmentDeadlineAt', undefined);
+  } else {
+    doc.set('assignmentAckAt', undefined);
+    doc.assignmentDeadlineAt = new Date(Date.now() + env.DISPATCH_ACK_SECONDS * 1000);
+  }
+  doc.set('dispatchOverdueAt', undefined);
   doc.timeline.push({
-    event: 'assigned',
+    event: isReassignment ? 'reassigned' : 'assigned',
     at: new Date(),
     actorId: new mongoose.Types.ObjectId(auth.accountId),
     actorRole: auth.role as 'admin' | 'responder',
@@ -341,14 +459,134 @@ export async function assign(
     action: 'emergency.assigned',
     targetType: 'emergency',
     targetId: doc._id,
-    meta: { responderId },
+    meta: { responderId, previousResponderId },
     requestId: ctx.requestId,
     ip: ctx.ip,
     userAgent: ctx.userAgent,
   });
 
-  emitEmergencyEvent(ctx.io, 'emergency.assigned', doc);
+  emitEmergencyEvent(
+    ctx.io,
+    'emergency.assigned',
+    doc,
+    // The outgoing responder is no longer in the incident's responder room, so
+    // name it explicitly or their app never hears that it was taken away.
+    isReassignment ? [`responder:${previousResponderId}`] : [],
+  );
   await setResponderDutyForEmergency(responderId, 'busy', ctx);
+  if (isReassignment) {
+    await setResponderDutyForEmergency(previousResponderId, 'available', ctx);
+  }
+  return doc;
+}
+
+/**
+ * The responder answering a dispatcher: yes, I have it.
+ *
+ * Idempotent, because the answer can be sent twice over a bad connection and the
+ * second one must not look like a failure.
+ */
+export async function acknowledge(
+  id: string,
+  auth: AuthContext,
+  ctx: ServiceCtx,
+): Promise<IEmergency> {
+  if (auth.role !== 'responder') {
+    throw new AppError('Only responders acknowledge an assignment', 403, 'FORBIDDEN');
+  }
+  const doc = await Emergency.findById(id);
+  if (!doc) throw new AppError('Emergency not found', 404, 'NOT_FOUND');
+  if (doc.assignedResponderId?.toString() !== auth.accountId) {
+    throw new AppError('Not your assignment', 403, 'FORBIDDEN');
+  }
+  if (!ACTIVE_STATUSES.includes(doc.status)) {
+    throw new AppError('Emergency is already closed', 409, 'INVALID_TRANSITION');
+  }
+  if (doc.assignmentAckAt) return doc;
+
+  doc.assignmentAckAt = new Date();
+  doc.set('assignmentDeadlineAt', undefined);
+  doc.timeline.push({
+    event: 'assignment_acknowledged',
+    at: new Date(),
+    actorId: new mongoose.Types.ObjectId(auth.accountId),
+    actorRole: 'responder',
+  } as never);
+  await doc.save();
+
+  await AuditLog.create({
+    actorId: new mongoose.Types.ObjectId(auth.accountId),
+    actorRole: 'responder',
+    action: 'emergency.assignment_acknowledged',
+    targetType: 'emergency',
+    targetId: doc._id,
+    requestId: ctx.requestId,
+    ip: ctx.ip,
+    userAgent: ctx.userAgent,
+  });
+
+  emitEmergencyEvent(ctx.io, 'emergency.assignment_acknowledged', doc);
+  return doc;
+}
+
+/**
+ * Hands an incident back to the pending pool.
+ *
+ * A responder releases their own assignment -- cannot take it, already on
+ * another call, sent in error. A dispatcher may release anyone's. Either way the
+ * incident returns to `pending` where it can be taken or dispatched again, which
+ * is what stops one unreachable phone from stranding an open emergency.
+ */
+export async function release(
+  id: string,
+  body: ReleaseBody,
+  auth: AuthContext,
+  ctx: ServiceCtx,
+): Promise<IEmergency> {
+  if (auth.role !== 'responder' && auth.role !== 'admin') {
+    throw new AppError('Forbidden', 403, 'FORBIDDEN');
+  }
+  const doc = await Emergency.findById(id);
+  if (!doc) throw new AppError('Emergency not found', 404, 'NOT_FOUND');
+  if (!ACTIVE_STATUSES.includes(doc.status)) {
+    throw new AppError('Emergency is already closed', 409, 'INVALID_TRANSITION');
+  }
+  const heldBy = doc.assignedResponderId?.toString();
+  if (!heldBy) {
+    throw new AppError('Emergency has no assigned responder', 409, 'NOT_ASSIGNED');
+  }
+  if (auth.role === 'responder' && heldBy !== auth.accountId) {
+    throw new AppError('Not your assignment', 403, 'FORBIDDEN');
+  }
+
+  doc.status = 'pending';
+  doc.set('assignedResponderId', undefined);
+  doc.set('assignmentAckAt', undefined);
+  doc.set('assignmentDeadlineAt', undefined);
+  doc.set('dispatchOverdueAt', undefined);
+  doc.timeline.push({
+    event: 'released',
+    at: new Date(),
+    actorId: new mongoose.Types.ObjectId(auth.accountId),
+    actorRole: auth.role as 'admin' | 'responder',
+    note: body.reason,
+  } as never);
+  await doc.save();
+
+  await AuditLog.create({
+    actorId: new mongoose.Types.ObjectId(auth.accountId),
+    actorRole: auth.role as 'admin' | 'responder',
+    action: 'emergency.released',
+    targetType: 'emergency',
+    targetId: doc._id,
+    meta: { releasedResponderId: heldBy, reason: body.reason },
+    requestId: ctx.requestId,
+    ip: ctx.ip,
+    userAgent: ctx.userAgent,
+  });
+
+  emitEmergencyEvent(ctx.io, 'emergency.released', doc, [`responder:${heldBy}`]);
+  await setResponderDutyForEmergency(heldBy, 'available', ctx);
   return doc;
 }
 
@@ -390,6 +628,59 @@ export async function setOnTheWay(
 
   emitEmergencyEvent(ctx.io, 'emergency.responder_on_the_way', doc);
   await setResponderDutyForEmergency(auth.accountId, 'responding', ctx);
+  return doc;
+}
+
+/**
+ * The responder is at the scene.
+ *
+ * This is the timestamp every response-time figure should be measured against:
+ * `assigned` says somebody answered, `responder_on_the_way` says they set off,
+ * and neither of those is help arriving.
+ */
+export async function setArrived(
+  id: string,
+  auth: AuthContext,
+  ctx: ServiceCtx,
+): Promise<IEmergency> {
+  if (auth.role !== 'responder') {
+    throw new AppError('Only responders mark arrival', 403, 'FORBIDDEN');
+  }
+  const doc = await Emergency.findById(id);
+  if (!doc) throw new AppError('Emergency not found', 404, 'NOT_FOUND');
+  if (doc.assignedResponderId?.toString() !== auth.accountId) {
+    throw new AppError('Not your assignment', 403, 'FORBIDDEN');
+  }
+  if (doc.status === 'arrived') return doc;
+  if (
+    doc.status !== 'assigned' &&
+    doc.status !== 'responder_on_the_way' &&
+    doc.status !== 'responder_nearby'
+  ) {
+    throw new AppError('Not on the way to this emergency', 409, 'INVALID_TRANSITION');
+  }
+
+  doc.status = 'arrived';
+  doc.timeline.push({
+    event: 'arrived',
+    at: new Date(),
+    actorId: new mongoose.Types.ObjectId(auth.accountId),
+    actorRole: 'responder',
+  } as never);
+  await doc.save();
+
+  await AuditLog.create({
+    actorId: new mongoose.Types.ObjectId(auth.accountId),
+    actorRole: 'responder',
+    action: 'emergency.responder_arrived',
+    targetType: 'emergency',
+    targetId: doc._id,
+    requestId: ctx.requestId,
+    ip: ctx.ip,
+    userAgent: ctx.userAgent,
+  });
+
+  emitEmergencyEvent(ctx.io, 'emergency.responder_arrived', doc);
   return doc;
 }
 
@@ -496,6 +787,121 @@ export async function requestUpdate(
   });
 
   emitEmergencyEvent(ctx.io, 'emergency.update_requested', doc);
+  return doc;
+}
+
+/**
+ * One line on the incident from whoever is sending it.
+ *
+ * A field report is a document; this is a sentence. The difference matters when
+ * the question is "are you still at the gate?" and the answer costs a dispatcher
+ * two minutes of waiting for someone to write a report about it.
+ */
+export async function sendMessage(
+  id: string,
+  body: UserMessageBody,
+  auth: AuthContext,
+  ctx: ServiceCtx,
+): Promise<IEmergency> {
+  if (auth.role === 'user') return sendUserMessage(id, body, auth, ctx);
+  return sendDispatchMessage(id, body, auth, ctx);
+}
+
+async function sendDispatchMessage(
+  id: string,
+  body: UserMessageBody,
+  auth: AuthContext,
+  ctx: ServiceCtx,
+): Promise<IEmergency> {
+  if (auth.role !== 'responder' && auth.role !== 'admin') {
+    throw new AppError('Forbidden', 403, 'FORBIDDEN');
+  }
+  const doc = await Emergency.findById(id);
+  if (!doc) throw new AppError('Emergency not found', 404, 'NOT_FOUND');
+  if (doc.status === 'resolved' || doc.status === 'cancelled') {
+    throw new AppError('This emergency is closed', 409, 'INVALID_TRANSITION');
+  }
+  if (auth.role === 'responder' && doc.assignedResponderId?.toString() !== auth.accountId) {
+    throw new AppError('Not your assignment', 403, 'FORBIDDEN');
+  }
+
+  // The working channel is the default. Reaching the person in the emergency is
+  // something the sender has to choose.
+  const audience = body.audience ?? 'dispatch';
+
+  doc.timeline.push({
+    event: 'message',
+    at: new Date(),
+    actorId: new mongoose.Types.ObjectId(auth.accountId),
+    actorRole: auth.role as 'admin' | 'responder',
+    note: body.message,
+    code: body.code,
+    audience,
+  } as never);
+  await doc.save();
+
+  await AuditLog.create({
+    actorId: new mongoose.Types.ObjectId(auth.accountId),
+    actorRole: auth.role as 'admin' | 'responder',
+    action: 'emergency.message',
+    targetType: 'emergency',
+    targetId: doc._id,
+    meta: { audience, code: body.code, messageLength: body.message.length },
+    requestId: ctx.requestId,
+    ip: ctx.ip,
+    userAgent: ctx.userAgent,
+  });
+
+  emitEmergencyEvent(ctx.io, 'emergency.message', doc);
+  return doc;
+}
+
+export async function sendUserMessage(
+  id: string,
+  body: UserMessageBody,
+  auth: AuthContext,
+  ctx: ServiceCtx,
+): Promise<IEmergency> {
+  if (auth.role !== 'user') {
+    throw new AppError('Only the reporting user can send a message', 403, 'FORBIDDEN');
+  }
+  // loadAccessible already refuses another user's emergency.
+  const doc = await loadAccessible(id, auth);
+  if (doc.status === 'resolved' || doc.status === 'cancelled') {
+    throw new AppError(
+      'This emergency is closed. Raise a new alert if you still need help.',
+      409,
+      'INVALID_TRANSITION',
+    );
+  }
+
+  doc.timeline.push({
+    event: 'user_message',
+    at: new Date(),
+    actorId: new mongoose.Types.ObjectId(auth.accountId),
+    actorRole: 'user',
+    note: body.message,
+  } as never);
+  await doc.save();
+
+  await AuditLog.create({
+    actorId: new mongoose.Types.ObjectId(auth.accountId),
+    actorRole: 'user',
+    action: 'emergency.user_message',
+    targetType: 'emergency',
+    targetId: doc._id,
+    // The message itself lives on the emergency; the log records that one was
+    // sent, not a second copy of what someone said during an emergency.
+    meta: { messageLength: body.message.length },
+    requestId: ctx.requestId,
+    ip: ctx.ip,
+    userAgent: ctx.userAgent,
+  });
+
+  emitEmergencyEvent(ctx.io, 'emergency.user_message', doc);
+  // Also announced on the generic channel, so a client that listens for one
+  // kind of message hears all of them.
+  emitEmergencyEvent(ctx.io, 'emergency.message', doc);
   return doc;
 }
 

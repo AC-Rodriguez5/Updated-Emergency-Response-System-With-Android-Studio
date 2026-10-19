@@ -18,7 +18,13 @@ export function NotificationToasts() {
   if (toasts.length === 0 && !emergencyAudioBlocked) return null;
 
   return (
-    <div className="fixed top-4 right-4 z-[200] flex flex-col gap-3 w-[360px] max-w-[calc(100vw-32px)]">
+    // data-overlay-layer: an open dialog treats clicks in here as its own, so
+    // a dispatcher can acknowledge an alert without losing the incident they
+    // are reading.
+    <div
+      data-overlay-layer
+      className="fixed top-4 right-4 z-[200] flex flex-col gap-3 w-[360px] max-w-[calc(100vw-32px)]"
+    >
       <AnimatePresence initial={false}>
       {emergencyAudioBlocked && (
         <motion.div layout initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="rounded-xl border border-red-300 bg-red-50 p-4 shadow-lg">

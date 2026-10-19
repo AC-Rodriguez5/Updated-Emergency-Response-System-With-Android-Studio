@@ -82,6 +82,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                       EmergencyConfirmationScreen(
                         emergencyType:
                             state.uri.queryParameters['type'] ?? 'general_sos',
+                        // Only the SOS hold passes this; a bad value must not
+                        // start a timer nobody asked for.
+                        countdownSeconds: int.tryParse(
+                          state.uri.queryParameters['countdown'] ?? '',
+                        ),
                       ),
                     ),
                   ),

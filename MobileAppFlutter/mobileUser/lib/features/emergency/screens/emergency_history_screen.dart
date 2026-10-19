@@ -23,7 +23,10 @@ class EmergencyHistoryScreen extends ConsumerWidget {
                   children: [
                     Icon(Icons.history, size: 48, color: AppColors.textMuted),
                     SizedBox(height: 12),
-                    Text('No emergency history', style: TextStyle(color: AppColors.textMuted)),
+                    Text(
+                      'No emergency history',
+                      style: TextStyle(color: AppColors.textMuted),
+                    ),
                   ],
                 ),
               )
@@ -34,7 +37,9 @@ class EmergencyHistoryScreen extends ConsumerWidget {
                 itemBuilder: (_, i) {
                   final em = list[i];
                   return GestureDetector(
-                    onTap: em.isActive ? () => context.push('/home/emergency/${em.id}') : null,
+                    onTap: em.isActive
+                        ? () => context.push('/home/emergency/${em.id}')
+                        : null,
                     child: Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
@@ -45,9 +50,12 @@ class EmergencyHistoryScreen extends ConsumerWidget {
                       child: Row(
                         children: [
                           Icon(
-                            em.type == 'medical' ? Icons.medical_services
-                                : em.type == 'fire' ? Icons.local_fire_department
-                                : em.type == 'crime' ? Icons.local_police
+                            em.type == 'medical'
+                                ? Icons.medical_services
+                                : em.type == 'fire'
+                                ? Icons.local_fire_department
+                                : em.type == 'crime'
+                                ? Icons.local_police
                                 : Icons.sos,
                             color: AppColors.alertRed,
                           ),
@@ -56,10 +64,18 @@ class EmergencyHistoryScreen extends ConsumerWidget {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(em.displayType, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                Text(
+                                  em.displayType,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
                                 Text(
                                   '${em.createdAt.day}/${em.createdAt.month}/${em.createdAt.year}',
-                                  style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.textMuted,
+                                  ),
                                 ),
                               ],
                             ),

@@ -122,6 +122,21 @@ class EmergencyRepository {
     }
   }
 
+  /// Sends a short message from the person in the emergency to dispatch.
+  ///
+  /// It lands on the emergency's timeline and raises a high-priority admin
+  /// notification, so it reaches the dispatcher looking at the incident rather
+  /// than a mailbox nobody watches.
+  Future<void> sendMessage({
+    required String emergencyId,
+    required String message,
+  }) async {
+    await _dio.post(
+      '/emergencies/$emergencyId/message',
+      data: {'message': message},
+    );
+  }
+
   Future<void> sendLocation({
     required Position location,
     String? emergencyId,

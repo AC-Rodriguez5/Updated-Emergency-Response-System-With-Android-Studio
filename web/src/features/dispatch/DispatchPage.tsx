@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Zap, User, CheckCircle, AlertCircle } from 'lucide-react';
+import { Zap, User, CheckCircle, AlertCircle, Clock } from 'lucide-react';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { StatusBadge } from '@/components/ui/Badge';
 import { TableSkeleton } from '@/components/ui/Skeleton';
@@ -8,6 +8,18 @@ import { api, getApiError } from '@/services/apiClient';
 import type { Emergency, Paginated, ResponderLiveLocation } from '@/types';
 
 const AVAILABLE_STATUSES = new Set(['on_duty', 'available']);
+
+/**
+ * Two things need a dispatcher, and only one of them is obvious.
+ *
+ * An incident nobody has accepted is plainly waiting. An incident assigned to a
+ * responder who has not answered looks handled on every other screen and is not
+ * — so it belongs on this page too, until they acknowledge it.
+ */
+function needsDispatcher(em: Emergency): boolean {
+  if (em.status === 'pending') return true;
+  return em.status === 'assigned' && !em.assignmentAckAt;
+}
 
 export default function DispatchPage() {
   const qc = useQueryClient();
@@ -20,7 +32,10 @@ export default function DispatchPage() {
     queryKey: ['dispatch-emergencies'],
     queryFn: async () => {
       const { data } = await api.get<{ data: Paginated<Emergency> }>('/emergencies/active?limit=50');
-      return data.data.items.filter((e) => e.status === 'pending');
+      // Unclaimed first: those are the ones where nobody is coming yet.
+      return data.data.items
+        .filter(needsDispatcher)
+        .sort((a, b) => Number(b.dispatchOverdue ?? false) - Number(a.dispatchOverdue ?? false));
     },
     refetchInterval: 15_000,
   });
@@ -32,6 +47,21 @@ export default function DispatchPage() {
       return data.data;
     },
     refetchInterval: 15_000,
+  });
+
+  const releaseMutation = useMutation({
+    mutationFn: async (emergencyId: string) =>
+      api.post(`/emergencies/${emergencyId}/release`, {
+        reason: 'Released by dispatcher',
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['dispatch-emergencies'] });
+      setSelectedEmergency(null);
+      setDispatchError(null);
+      setDispatchSuccess('Returned to the pending pool. Anyone can take it now.');
+      setTimeout(() => setDispatchSuccess(null), 4000);
+    },
+    onError: (err) => setDispatchError(getApiError(err)),
   });
 
   const assignMutation = useMutation({
@@ -74,7 +104,7 @@ export default function DispatchPage() {
         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-2">
             <Zap className="w-4 h-4 text-amber-500" />
-            <h2 className="font-bold text-slate-900">Unassigned Emergencies</h2>
+            <h2 className="font-bold text-slate-900">Needs a Dispatcher</h2>
             {(emergencies?.length ?? 0) > 0 && (
               <span className="ml-auto bg-amber-100 text-amber-700 text-xs font-bold rounded-full px-2.5 py-0.5">
                 {emergencies?.length}
@@ -84,7 +114,7 @@ export default function DispatchPage() {
           {emLoading ? <TableSkeleton /> : (
             <div className="divide-y divide-slate-50">
               {(emergencies ?? []).length === 0 ? (
-                <p className="p-8 text-center text-slate-400">No pending emergencies to dispatch</p>
+                <p className="p-8 text-center text-slate-400">Nothing waiting on a dispatcher</p>
               ) : (emergencies ?? []).map((em) => (
                 <button
                   key={em._id}
@@ -96,6 +126,18 @@ export default function DispatchPage() {
                     <StatusBadge status={em.priority} />
                   </div>
                   <p className="text-xs text-slate-500">{em.barangay ?? 'Tanza'}</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {em.dispatchOverdue && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-bold text-red-700">
+                        <Clock className="h-3 w-3" /> Unclaimed
+                      </span>
+                    )}
+                    {em.status === 'assigned' && !em.assignmentAckAt && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700">
+                        <AlertCircle className="h-3 w-3" /> Assigned, not acknowledged
+                      </span>
+                    )}
+                  </div>
                 </button>
               ))}
             </div>
@@ -145,7 +187,11 @@ export default function DispatchPage() {
                       title={!isAvailable ? `Responder is ${r.dutyStatus}` : undefined}
                       className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
-                      {assignMutation.isPending ? 'Dispatching…' : 'Assign'}
+                      {assignMutation.isPending
+                        ? 'Dispatching…'
+                        : selectedEmergency?.assignedResponderId
+                          ? 'Reassign'
+                          : 'Assign'}
                     </button>
                   </div>
                 );
@@ -162,8 +208,26 @@ export default function DispatchPage() {
             <strong className="text-blue-900">Selected:</strong>{' '}
             <span className="text-blue-700 capitalize">{selectedEmergency.type.replace('_', ' ')} — {selectedEmergency.barangay ?? 'Tanza'}</span>
           </span>
-          <span className="text-blue-400 ml-2">Click a responder's Assign button to dispatch.</span>
-          <button onClick={() => setSelectedEmergency(null)} className="ml-auto text-blue-400 hover:text-blue-600 text-xs">Clear</button>
+          <span className="text-blue-400 ml-2">
+            {selectedEmergency.assignedResponderId
+              ? 'Pick another responder to take it off the current one.'
+              : "Click a responder's Assign button to dispatch."}
+          </span>
+          {selectedEmergency.assignedResponderId && (
+            <button
+              onClick={() => releaseMutation.mutate(selectedEmergency._id)}
+              disabled={releaseMutation.isPending}
+              className="ml-auto rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-50 disabled:opacity-50"
+            >
+              {releaseMutation.isPending ? 'Releasing…' : 'Release to pool'}
+            </button>
+          )}
+          <button
+            onClick={() => setSelectedEmergency(null)}
+            className={`text-blue-400 hover:text-blue-600 text-xs ${selectedEmergency.assignedResponderId ? 'ml-3' : 'ml-auto'}`}
+          >
+            Clear
+          </button>
         </div>
       )}
     </AdminShell>

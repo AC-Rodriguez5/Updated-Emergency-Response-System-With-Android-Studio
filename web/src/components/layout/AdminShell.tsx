@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Menu, PanelLeftClose, Radio } from 'lucide-react';
+import { Menu, Radio } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { NotificationCenterButton } from '@/features/notifications/NotificationCenterButton';
@@ -37,14 +37,6 @@ export function AdminShell({ children, title = 'Command Center', actions }: Admi
             onClick={() => setMobileOpen(true)}
           >
             <Menu className="size-5" />
-          </button>
-          <button
-            type="button"
-            aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-            className="mr-4 hidden size-10 place-items-center rounded-xl text-slate-500 hover:bg-white hover:text-slate-900 lg:grid"
-            onClick={() => setCollapsed((value) => !value)}
-          >
-            <PanelLeftClose className={`size-5 transition-transform ${collapsed ? 'rotate-180' : ''}`} />
           </button>
           <div className="min-w-0 flex-1">
             <p className="ta-kicker hidden sm:block">Tanza MDRRMO / live operations</p>

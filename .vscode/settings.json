@@ -1,4 +1,8 @@
 {
     "java.configuration.updateBuildConfiguration": "interactive",
-    "cmake.sourceDirectory": "C:/Users/ADMIN/Desktop/TanzAlert Emergency Response System/Updated-Emergency-Response-System-With-Android-Studio/MobileAppFlutter/mobileUser/windows"
+    "cmake.sourceDirectory": "C:/Users/ADMIN/Desktop/TanzAlert Emergency Response System/Updated-Emergency-Response-System-With-Android-Studio/MobileAppFlutter/mobileUser/windows",
+    // The Flutter host builds (MobileAppFlutter/*/android) are Kotlin/Gradle and nothing in this
+    // workspace is a Java project, so the Java language server should not import them. Importing
+    // both is what produced "A project with the name android already exists".
+    "java.import.gradle.enabled": false
 }

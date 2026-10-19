@@ -6,7 +6,7 @@ import 'package:safealert_ui/safealert_ui.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../ble_panic_button/widgets/device_status_card.dart';
 import '../providers/emergency_provider.dart';
-import '../widgets/emergency_button.dart';
+import '../widgets/sos_hold_button.dart';
 
 class EmergencyHomeScreen extends ConsumerWidget {
   const EmergencyHomeScreen({super.key});
@@ -54,22 +54,46 @@ class EmergencyHomeScreen extends ConsumerWidget {
               ],
               const SizedBox(height: 26),
               const TanzAlertSectionHeader(
-                eyebrow: 'Immediate assistance',
-                title: 'What do you need?',
+                eyebrow: 'In danger or not sure?',
+                title: 'Hold for SOS',
                 description:
-                    'Choose the emergency type. You will confirm before anything is sent.',
+                    'Alerts the MDRRMO Tanza command center with your live '
+                    'location and profile. You can cancel during the countdown.',
               ),
-              const SizedBox(height: 14),
-              GridView.count(
-                crossAxisCount: 2,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: 1.12,
-                children: EmergencyTypeButton.all(
-                  onTap: (type) =>
-                      context.push('/home/emergency/confirm?type=$type'),
+              const SizedBox(height: 18),
+              Center(
+                child: SosHoldButton(
+                  // The countdown is the cancel window the copy above promises.
+                  onHoldComplete: () => context.push(
+                    '/home/emergency/confirm?type=general_sos&countdown=5',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 30),
+              const TanzAlertSectionHeader(
+                eyebrow: 'By dispatch priority',
+                title: "Or choose what's happening",
+              ),
+              const SizedBox(height: 12),
+              ..._EmergencyChoice.all.map(
+                (choice) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _EmergencyChoiceCard(
+                    choice: choice,
+                    onTap: () => context.push(
+                      '/home/emergency/confirm?type=${choice.type}',
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'MDRRMO coordinates with BFP and PNP Tanza when needed. '
+                'You only need to tap once.',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: AppColors.textMuted,
+                  height: 1.45,
                 ),
               ),
               const SizedBox(height: 28),
@@ -82,6 +106,28 @@ class EmergencyHomeScreen extends ConsumerWidget {
               const SizedBox(height: 12),
               _AmbulanceCard(
                 onTap: (type) => context.push('/home/ambulance/new?type=$type'),
+              ),
+              const SizedBox(height: 28),
+              const TanzAlertSectionHeader(
+                eyebrow: 'Be ready',
+                title: 'What MDRRMO will receive',
+                description:
+                    'Sent automatically with every alert, so you never have to '
+                    'explain it during one.',
+              ),
+              const SizedBox(height: 12),
+              _ReadinessRow(
+                icon: Icons.bloodtype_outlined,
+                label: 'Blood type',
+                value: user?.bloodType,
+                missingHint: 'Not on file',
+              ),
+              const SizedBox(height: 8),
+              _ReadinessRow(
+                icon: Icons.contact_phone_outlined,
+                label: 'Emergency contact',
+                value: user?.emergencyContactName,
+                missingHint: 'Not on file',
               ),
               const SizedBox(height: 28),
               const TanzAlertSectionHeader(
@@ -375,4 +421,193 @@ class _AmbulanceTypeChip extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// One of the three "what's happening" choices under the SOS button.
+///
+/// The order and the tier label come from the backend's own
+/// `priorityFor(type)`: medical and general SOS are dispatched as `critical`,
+/// fire and crime as `high`. The home screen says the same thing the dispatcher
+/// will see, rather than inventing a ranking of its own.
+class _EmergencyChoice {
+  final String type;
+  final String label;
+  final String detail;
+  final String tier;
+  final IconData icon;
+  final Color color;
+
+  const _EmergencyChoice({
+    required this.type,
+    required this.label,
+    required this.detail,
+    required this.tier,
+    required this.icon,
+    required this.color,
+  });
+
+  static const all = [
+    _EmergencyChoice(
+      type: 'medical',
+      label: 'Medical',
+      detail: 'Injury, collapse, chest pain',
+      tier: 'Critical',
+      icon: Icons.medical_services_rounded,
+      color: AppColors.alertRed,
+    ),
+    _EmergencyChoice(
+      type: 'fire',
+      label: 'Fire',
+      detail: 'Smoke, gas leak, sparks',
+      tier: 'High',
+      icon: Icons.local_fire_department_rounded,
+      color: Color(0xFFEA580C),
+    ),
+    _EmergencyChoice(
+      // The mock labels this "Silent alert, no sound". Silent mode is not
+      // built, so the copy describes what the alert is for instead of
+      // promising behaviour the app does not have yet.
+      type: 'crime',
+      label: 'Crime',
+      detail: 'Theft, assault, someone threatening you',
+      tier: 'High',
+      icon: Icons.local_police_rounded,
+      color: Color(0xFF7C3AED),
+    ),
+  ];
+}
+
+class _EmergencyChoiceCard extends StatelessWidget {
+  final _EmergencyChoice choice;
+  final VoidCallback onTap;
+
+  const _EmergencyChoiceCard({required this.choice, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: AppColors.surface,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(16),
+      side: BorderSide(color: AppColors.border),
+    ),
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: choice.color.withValues(alpha: .1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(choice.icon, color: choice.color, size: 23),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    choice.label,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    choice.detail,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: AppColors.textMuted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: choice.color.withValues(alpha: .1),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                choice.tier.toUpperCase(),
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: .7,
+                  color: choice.color,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+/// A single line of the "Be ready" section.
+///
+/// Read-only on purpose: these values are captured at registration and there
+/// is no profile editor in the app yet, so the row reports what dispatch will
+/// receive and flags a gap rather than linking somewhere that cannot fix it.
+class _ReadinessRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String? value;
+  final String missingHint;
+
+  const _ReadinessRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.missingHint,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final filled = (value ?? '').trim().isNotEmpty;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            size: 19,
+            color: filled ? AppColors.successGreen : AppColors.warningAmber,
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12.5,
+                color: AppColors.textMuted,
+              ),
+            ),
+          ),
+          Text(
+            filled ? value!.trim() : missingHint,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w800,
+              color: filled ? AppColors.textStrong : AppColors.warningAmber,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

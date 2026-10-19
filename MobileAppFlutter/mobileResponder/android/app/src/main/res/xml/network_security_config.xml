@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The backend on the local network is reached over plain http:// - a laptop on
+  the Wi-Fi has no certificate a phone would trust - and Android has blocked
+  cleartext by default since Android 9. The addresses ServerDiscovery sweeps
+  are not known ahead of time and private ranges cannot be written as <domain>
+  entries, so cleartext is permitted and every tunnelled or deployed address is
+  still https://. Remove this file, and the attribute in AndroidManifest.xml,
+  once the backend has a permanent HTTPS address.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+</network-security-config>

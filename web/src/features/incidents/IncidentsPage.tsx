@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, MapPin, CheckCircle, FileText, MessageSquare } from 'lucide-react';
+import { AlertTriangle, MapPin, CheckCircle, FileText, MessageSquare, Undo2, Send } from 'lucide-react';
 import { AdminShell } from '@/components/layout/AdminShell';
 import {
   StatusBadge,
@@ -23,9 +23,9 @@ export default function IncidentsPage() {
   const [filter, setFilter] = useState<Filter>('all');
   const [resolveModal, setResolveModal] = useState<{ open: boolean; id: string; type: string } | null>(null);
   const [reviewIncident, setReviewIncident] = useState<Emergency | null>(null);
-  const [updateModal, setUpdateModal] = useState<{ open: boolean; id: string } | null>(null);
   const [resolveNotes, setResolveNotes] = useState('');
-  const [updateMessage, setUpdateMessage] = useState('');
+  const [draft, setDraft] = useState('');
+  const [tellResident, setTellResident] = useState(false);
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['active-emergencies-full', filter],
@@ -48,6 +48,12 @@ export default function IncidentsPage() {
     socket.on('emergency.updated', handler);
     socket.on('emergency.responder_report', handler);
     socket.on('emergency.update_requested', handler);
+    socket.on('emergency.released', handler);
+    socket.on('emergency.assignment_acknowledged', handler);
+    socket.on('emergency.assignment_expired', handler);
+    socket.on('emergency.dispatch_overdue', handler);
+    socket.on('emergency.message', handler);
+    socket.on('emergency.responder_arrived', handler);
     socket.on('emergency.resolved', handler);
     socket.on('emergency.iot_keychain_created', handler);
     socket.on('emergency.iot_device_created', handler);
@@ -59,6 +65,12 @@ export default function IncidentsPage() {
       socket.off('emergency.updated', handler);
       socket.off('emergency.responder_report', handler);
       socket.off('emergency.update_requested', handler);
+      socket.off('emergency.released', handler);
+      socket.off('emergency.assignment_acknowledged', handler);
+      socket.off('emergency.assignment_expired', handler);
+      socket.off('emergency.dispatch_overdue', handler);
+      socket.off('emergency.message', handler);
+      socket.off('emergency.responder_arrived', handler);
       socket.off('emergency.resolved', handler);
       socket.off('emergency.iot_keychain_created', handler);
       socket.off('emergency.iot_device_created', handler);
@@ -78,21 +90,40 @@ export default function IncidentsPage() {
     },
   });
 
-  const requestUpdateMutation = useMutation({
-    mutationFn: async ({ id, message }: { id: string; message: string }) => {
+  // A sentence, not a filing. "Are you still at the gate?" should not cost a
+  // dispatcher two minutes of waiting for somebody to write a report about it.
+  const messageMutation = useMutation({
+    mutationFn: async ({ id, message, audience }: { id: string; message: string; audience: 'dispatch' | 'all' }) => {
       const { data } = await api.post<{ data: Emergency }>(
-        `/admin/emergencies/${id}/request-update`,
-        { message },
+        `/emergencies/${id}/message`,
+        { message, audience },
       );
       return data.data;
     },
     onSuccess: (updated) => {
       void qc.invalidateQueries({ queryKey: ['active-emergencies-full'] });
       setReviewIncident(updated);
-      setUpdateModal(null);
-      setUpdateMessage('');
+      setDraft('');
     },
   });
+
+  // Takes the incident off its responder and returns it to the pending pool.
+  // Without this an unreachable phone holds an open emergency until someone
+  // closes it as resolved, which is a lie told to the reports page.
+  const releaseMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { data } = await api.post<{ data: Emergency }>(
+        `/emergencies/${id}/release`,
+        { reason: 'Released by dispatcher' },
+      );
+      return data.data;
+    },
+    onSuccess: (updated) => {
+      void qc.invalidateQueries({ queryKey: ['active-emergencies-full'] });
+      setReviewIncident(updated);
+    },
+  });
+
 
   const emergencies = data ?? [];
 
@@ -228,7 +259,18 @@ export default function IncidentsPage() {
                 <ReviewRow label="Location" value={locationLabel(reviewIncident)} />
                 <ReviewRow label="Source" value={sourceLabel(reviewIncident.source)} />
                 <ReviewRow label="Reported" value={fmt(reviewIncident.createdAt)} />
-                <ReviewRow label="Responder" value={reviewIncident.assignedResponderId ? 'Assigned' : 'Unassigned'} />
+                <ReviewRow
+                  label="Responder"
+                  value={
+                    !reviewIncident.assignedResponderId
+                      ? reviewIncident.dispatchOverdue
+                        ? 'Unassigned — nobody has accepted'
+                        : 'Unassigned'
+                      : reviewIncident.assignmentAckAt
+                        ? 'Assigned and acknowledged'
+                        : 'Assigned — waiting for acknowledgement'
+                  }
+                />
                 {reviewIncident.source === 'iot_device' && (
                   <>
                     <ReviewRow label="Device" value={reviewIncident.sourceDeviceId} />
@@ -248,18 +290,76 @@ export default function IncidentsPage() {
 
             <div>
               <h3 className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-900">
-                <FileText className="h-4 w-4 text-blue-600" /> Responder Reports
+                <FileText className="h-4 w-4 text-blue-600" /> Messages &amp; Responder Reports
               </h3>
               <ResponderReports emergency={reviewIncident} />
             </div>
 
+            <div className="rounded-2xl border border-slate-200 p-4">
+              <h3 className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-900">
+                <Send className="h-4 w-4 text-blue-600" /> Say something now
+              </h3>
+              <div className="mb-3 flex flex-wrap gap-2">
+                {QUICK_REPLIES.map((quick) => (
+                  <button
+                    key={quick.label}
+                    onClick={() =>
+                      messageMutation.mutate({
+                        id: reviewIncident._id,
+                        message: quick.message,
+                        audience: tellResident ? 'all' : 'dispatch',
+                      })
+                    }
+                    disabled={messageMutation.isPending}
+                    className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                  >
+                    {quick.label}
+                  </button>
+                ))}
+              </div>
+              <textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                rows={2}
+                maxLength={500}
+                placeholder="Type an update for the responder…"
+                className="w-full rounded-xl border border-slate-200 p-3 text-sm focus:border-blue-400 focus:outline-none"
+              />
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={tellResident}
+                    onChange={(e) => setTellResident(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                  Also show this to the person in the emergency
+                  <span className="font-normal text-slate-400">(applies to the quick replies too)</span>
+                </label>
+                <button
+                  onClick={() =>
+                    messageMutation.mutate({
+                      id: reviewIncident._id,
+                      message: draft,
+                      audience: tellResident ? 'all' : 'dispatch',
+                    })
+                  }
+                  disabled={!draft.trim() || messageMutation.isPending}
+                  className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  <Send className="h-4 w-4" /> {messageMutation.isPending ? 'Sending…' : 'Send'}
+                </button>
+              </div>
+            </div>
+
             <div className="flex flex-wrap justify-end gap-3 border-t border-slate-100 pt-4">
               <button
-                onClick={() => setUpdateModal({ open: true, id: reviewIncident._id })}
-                disabled={!reviewIncident.assignedResponderId || requestUpdateMutation.isPending}
-                className="inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => releaseMutation.mutate(reviewIncident._id)}
+                disabled={!reviewIncident.assignedResponderId || releaseMutation.isPending}
+                title="Return this incident to the pending pool"
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <MessageSquare className="h-4 w-4" /> Ask for Update
+                <Undo2 className="h-4 w-4" /> {releaseMutation.isPending ? 'Releasing…' : 'Release'}
               </button>
               <button
                 onClick={() => setResolveModal({ open: true, id: reviewIncident._id, type: reviewIncident.type })}
@@ -273,35 +373,6 @@ export default function IncidentsPage() {
         )}
       </Modal>
 
-      <Modal
-        open={updateModal?.open ?? false}
-        onClose={() => setUpdateModal(null)}
-        title="Ask Responder for Update"
-      >
-        <p className="text-slate-600 text-sm mb-4">
-          Write a clear request. The assigned responder will see it in the incident details.
-        </p>
-        <label className="block text-sm font-medium text-slate-700 mb-1.5">Update request message</label>
-        <textarea
-          value={updateMessage}
-          onChange={(e) => setUpdateMessage(e.target.value)}
-          rows={4}
-          className="mb-4 w-full resize-none rounded-xl border border-slate-300 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          placeholder="Example: Please confirm patient status and whether transport is needed."
-        />
-        <div className="flex justify-end gap-3">
-          <button onClick={() => setUpdateModal(null)} className="px-4 py-2 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-50">
-            Cancel
-          </button>
-          <button
-            onClick={() => updateModal && requestUpdateMutation.mutate({ id: updateModal.id, message: updateMessage.trim() })}
-            disabled={updateMessage.trim().length < 5 || requestUpdateMutation.isPending}
-            className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-bold disabled:opacity-50"
-          >
-            {requestUpdateMutation.isPending ? 'Sending...' : 'Send Request'}
-          </button>
-        </div>
-      </Modal>
 
       <Modal
         open={resolveModal?.open ?? false}
@@ -350,14 +421,48 @@ function updateRequests(emergency: Emergency) {
     .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 }
 
+// Messages the person in the emergency typed from the mobile app. Newest first:
+// in a live incident the latest thing they said is the thing that matters.
+function userMessages(emergency: Emergency) {
+  return [...(emergency.timeline ?? [])]
+    .filter((event) => event.event === 'user_message')
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+}
+
+// The live channel: what the responder in the field and dispatch have said to
+// each other while the incident is open. Oldest first, because this one reads
+// as a conversation rather than as a stack of filings.
+function channelMessages(emergency: Emergency) {
+  return [...(emergency.timeline ?? [])]
+    .filter((event) => event.event === 'message')
+    .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+}
+
+// One tap, sent the moment it is pressed. Every one of these goes to the
+// assigned responder; whether it also reaches the person in the emergency is
+// the dispatcher's call, made with the checkbox below them.
+const QUICK_REPLIES: Array<{ label: string; message: string }> = [
+  { label: 'Status?', message: 'Status update please.' },
+  { label: 'ETA?', message: 'What is your ETA?' },
+  { label: 'Backup sent', message: 'Backup is on the way to you.' },
+  { label: 'Help is close', message: 'Help is close. Stay where you are if it is safe.' },
+  { label: 'Stand down', message: 'Stand down — this incident is being handled elsewhere.' },
+];
+
 function ReportSummary({ emergency }: { emergency: Emergency }) {
   const reports = reportEvents(emergency);
+  const messages = userMessages(emergency);
   const pendingUpdate = updateRequests(emergency).find((event) => event.reportStatus === 'needs_update');
-  if (reports.length === 0 && !pendingUpdate) {
+  if (reports.length === 0 && messages.length === 0 && !pendingUpdate) {
     return <span className="text-xs text-slate-400">No reports</span>;
   }
   return (
     <div className="flex flex-col gap-1">
+      {messages.length > 0 && (
+        <span className="inline-flex items-center gap-1 text-xs font-bold text-red-700">
+          <MessageSquare className="h-3.5 w-3.5" /> {messages.length} from sender
+        </span>
+      )}
       {reports.length > 0 && (
         <span className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700">
           <FileText className="h-3.5 w-3.5" /> {reports.length} submitted
@@ -371,15 +476,63 @@ function ReportSummary({ emergency }: { emergency: Emergency }) {
 function ResponderReports({ emergency }: { emergency: Emergency }) {
   const reports = reportEvents(emergency);
   const requests = updateRequests(emergency);
-  if (reports.length === 0 && requests.length === 0) {
+  const messages = userMessages(emergency);
+  const channel = channelMessages(emergency);
+  if (
+    reports.length === 0 &&
+    requests.length === 0 &&
+    messages.length === 0 &&
+    channel.length === 0
+  ) {
     return (
       <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
-        No responder reports or admin update requests have been recorded yet.
+        No messages, responder reports or admin update requests have been recorded yet.
       </div>
     );
   }
   return (
     <div className="space-y-3">
+      {channel.length > 0 && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-3">
+          <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">
+            Incident channel
+          </p>
+          <div className="space-y-2">
+            {channel.map((entry) => (
+              <div
+                key={`${entry.at}-${entry.note}`}
+                className={`rounded-xl p-3 ${
+                  entry.actorRole === 'responder'
+                    ? 'bg-blue-50 text-blue-900'
+                    : 'bg-amber-50 text-amber-900'
+                }`}
+              >
+                <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] font-bold">
+                  <span>{entry.actorRole === 'responder' ? 'Responder' : 'Dispatch'}</span>
+                  <span className="font-medium opacity-70">{fmt(entry.at)}</span>
+                  <span className="rounded-full bg-white/70 px-2 py-0.5 font-semibold">
+                    {entry.audience === 'all' ? 'Seen by the resident' : 'Dispatch only'}
+                  </span>
+                </div>
+                <p className="whitespace-pre-wrap text-sm leading-6">{entry.note}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {/* The sender's own words come first — nobody else on this screen is
+          standing where the emergency is. */}
+      {messages.map((message) => (
+        <div key={`${message.at}-${message.note}`} className="rounded-2xl border border-red-200 bg-red-50 p-4">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-2 text-sm font-bold text-red-800">
+              <MessageSquare className="h-4 w-4" /> Message from sender
+            </span>
+          </div>
+          <p className="whitespace-pre-wrap text-sm leading-6 text-red-900">{message.note}</p>
+          <p className="mt-2 text-xs text-red-700">{fmt(message.at)}</p>
+        </div>
+      ))}
       {requests.map((request) => (
         <div key={`${request.at}-${request.note}`} className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">

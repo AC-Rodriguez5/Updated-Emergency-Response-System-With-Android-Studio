@@ -8,6 +8,7 @@ import { seedAmbulanceUnits } from './seed/ambulanceUnits.js';
 import { verifyAccessToken } from './modules/auth/jwt.js';
 import { Responder } from './models/index.js';
 import { emergencyTypesForResponder } from './modules/emergencies/responderRoleAccess.js';
+import { startDispatchWatchdog } from './modules/emergencies/dispatch.watchdog.js';
 async function autoJoinRooms(socket, auth) {
     const { accountId, role } = auth;
     if (role === 'user')
@@ -69,6 +70,7 @@ async function bootstrap() {
         }
     });
     app.set('io', io);
+    startDispatchWatchdog(io);
     io.on('connection', (socket) => {
         const auth = socket.data.auth;
         if (auth) {

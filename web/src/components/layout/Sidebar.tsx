@@ -1,7 +1,7 @@
 import { motion } from 'motion/react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
-  Activity, AlertTriangle, Ambulance, BarChart3, CheckSquare, ChevronLeft,
+  Activity, AlertTriangle, Ambulance, BarChart3, CheckSquare,
   ClipboardList, Cpu, LayoutDashboard, LogOut, Map, Radio, Settings, Shield,
   Users, X, Zap,
 } from 'lucide-react';
@@ -52,14 +52,32 @@ export function Sidebar({ collapsed, mobileOpen, onClose, onToggle }: SidebarPro
       <motion.aside
         initial={false}
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex h-dvh w-[286px] flex-col overflow-hidden bg-[#071526] text-white shadow-command lg:relative lg:z-20 lg:translate-x-0',
+          'fixed inset-y-0 left-0 z-50 flex h-dvh w-[286px] flex-col overflow-hidden bg-[#071526] text-white lg:sticky lg:top-0 lg:bottom-auto lg:z-20 lg:translate-x-0',
           mobileOpen ? 'translate-x-0' : '-translate-x-full',
           collapsed ? 'lg:w-20' : 'lg:w-[272px]',
           'transition-[width,transform] duration-200 ease-out',
         )}
       >
         <div className="flex h-[72px] items-center border-b border-white/10 px-4">
-          <div className="flex min-w-0 flex-1 items-center gap-3">
+          {/*
+            The brand is the collapse control: one obvious target, in the one
+            place that is always visible whether the rail is open or shut. On a
+            phone the sidebar is a drawer rather than a rail, so the same tap
+            does the equivalent thing and closes it.
+          */}
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+                onClose();
+                return;
+              }
+              onToggle();
+            }}
+            aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+            title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+            className="-mx-2 flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-white/[.06]"
+          >
             <div className="relative grid size-10 shrink-0 place-items-center rounded-xl bg-cyan-400 text-[#071526] shadow-[0_0_28px_rgba(34,211,238,.22)]">
               <Shield className="size-5" strokeWidth={2.4} />
               <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-[#071526] bg-emerald-400" />
@@ -72,7 +90,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose, onToggle }: SidebarPro
                 </p>
               </div>
             )}
-          </div>
+          </button>
           <button
             type="button"
             aria-label="Close navigation"
@@ -83,9 +101,9 @@ export function Sidebar({ collapsed, mobileOpen, onClose, onToggle }: SidebarPro
           </button>
         </div>
 
-        <div className={cn('px-4 pt-5', collapsed && 'lg:px-3')}>
+        <div className={cn('px-4 pt-3', collapsed && 'lg:px-3')}>
           {!collapsed ? (
-            <div className="flex items-center gap-2 rounded-xl border border-cyan-300/10 bg-cyan-300/[.06] px-3 py-2.5">
+            <div className="flex items-center gap-2 rounded-xl border border-cyan-300/10 bg-cyan-300/[.06] px-3 py-2">
               <Radio className="size-4 text-cyan-300" />
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-bold text-white/90">Operations live</p>
@@ -94,13 +112,19 @@ export function Sidebar({ collapsed, mobileOpen, onClose, onToggle }: SidebarPro
               <Activity className="size-4 text-emerald-400" />
             </div>
           ) : (
-            <div className="mx-auto hidden size-10 place-items-center rounded-xl bg-cyan-300/10 text-cyan-300 lg:grid" title="Operations live">
+            <div className="mx-auto hidden size-9 place-items-center rounded-xl bg-cyan-300/10 text-cyan-300 lg:grid" title="Operations live">
               <Radio className="size-4" />
             </div>
           )}
         </div>
 
-        <nav aria-label="Primary navigation" className={cn('flex-1 space-y-1 overflow-y-auto px-3 py-5', collapsed && 'lg:px-3')}>
+        <nav
+          aria-label="Primary navigation"
+          className={cn(
+            'ta-no-scrollbar flex-1 space-y-0.5 overflow-y-auto px-3 py-2',
+            collapsed && 'lg:px-3',
+          )}
+        >
           {NAV.map(({ to, label, icon: Icon }, index) => (
             <motion.div
               key={to}
@@ -114,7 +138,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose, onToggle }: SidebarPro
                 onClick={onClose}
                 className={({ isActive }) =>
                   cn(
-                    'group relative flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-semibold transition-colors',
+                    'group relative flex min-h-[34px] items-center gap-3 rounded-xl px-3 text-sm font-semibold transition-colors',
                     isActive
                       ? 'bg-cyan-300/12 text-white'
                       : 'text-slate-400 hover:bg-white/[.06] hover:text-white',
@@ -124,7 +148,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose, onToggle }: SidebarPro
               >
                 {({ isActive }) => (
                   <>
-                    {isActive && <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-cyan-300" />}
+                    {isActive && <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-cyan-300" />}
                     <Icon className={cn('size-[18px] shrink-0', isActive && 'text-cyan-300')} />
                     {!collapsed && <span className="truncate">{label}</span>}
                   </>
@@ -134,10 +158,10 @@ export function Sidebar({ collapsed, mobileOpen, onClose, onToggle }: SidebarPro
           ))}
         </nav>
 
-        <div className={cn('border-t border-white/10 p-3', collapsed && 'lg:px-3')}>
+        <div className={cn('border-t border-white/10 px-3 py-2', collapsed && 'lg:px-3')}>
           {!collapsed && (
-            <div className="mb-2 flex items-center gap-3 rounded-xl px-2 py-2">
-              <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-white/10 text-xs font-extrabold text-cyan-200">
+            <div className="mb-1.5 flex items-center gap-3 rounded-xl px-2 py-1.5">
+              <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-white/10 text-xs font-extrabold text-cyan-200">
                 {(admin?.name ?? admin?.email ?? 'A').slice(0, 2).toUpperCase()}
               </div>
               <div className="min-w-0">
@@ -151,7 +175,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose, onToggle }: SidebarPro
             onClick={() => void handleLogout()}
             title={collapsed ? 'Sign out' : undefined}
             className={cn(
-              'flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-semibold text-slate-400 transition-colors hover:bg-red-400/10 hover:text-red-200',
+              'flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-sm font-semibold text-slate-400 transition-colors hover:bg-red-400/10 hover:text-red-200',
               collapsed && 'lg:justify-center lg:px-0',
             )}
           >
@@ -159,15 +183,6 @@ export function Sidebar({ collapsed, mobileOpen, onClose, onToggle }: SidebarPro
             {!collapsed && 'Sign out'}
           </button>
         </div>
-
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-          className="absolute right-3 top-[84px] hidden size-8 place-items-center rounded-lg border border-white/10 bg-white/[.06] text-white/50 hover:bg-white/10 hover:text-white lg:grid"
-        >
-          <ChevronLeft className={cn('size-4 transition-transform', collapsed && 'rotate-180')} />
-        </button>
       </motion.aside>
     </>
   );

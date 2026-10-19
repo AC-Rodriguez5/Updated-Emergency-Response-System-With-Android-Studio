@@ -124,6 +124,18 @@ tbody tr {
   font-family: 'Manrope Variable', Manrope, system-ui, sans-serif;
 }
 
+/*
+  Leaflet gives its own panes z-index 400-1000, well above the modal overlay (z-40)
+  and panel (z-50). Unless a map's card is its own stacking context, the tiles and
+  markers paint straight through an open dialog. Rather than chase that card by
+  card, blank every map on the page while any Radix dialog is open: `visibility`
+  (not `display`) so the map keeps its box and does not have to re-measure itself
+  when the dialog closes. A map placed INSIDE a dialog would need a carve-out here.
+*/
+body:has([role='dialog'][data-state='open']) .leaflet-container {
+  visibility: hidden;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -133,4 +145,23 @@ tbody tr {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/*
+  The command rail carries no scrollbar.
+
+  Its eleven destinations are laid out to fit the shortest screen this console
+  is used on, and a strip of browser chrome down the dark edge reads as a seam
+  between the rail and the page rather than as a control. Overflow stays
+  scrollable for the pathological case — a very short window, or a browser with
+  large text — so a destination can never become unreachable; it simply does it
+  without drawing anything.
+*/
+.ta-no-scrollbar {
+  scrollbar-width: none;
+}
+
+.ta-no-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }

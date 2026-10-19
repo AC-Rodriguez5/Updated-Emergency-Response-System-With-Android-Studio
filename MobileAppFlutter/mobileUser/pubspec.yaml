@@ -9,6 +9,8 @@ environment:
 dependencies:
   safealert_ui:
     path: ../packages/safealert_ui
+  tanzalert_facilities:
+    path: ../packages/tanzalert_facilities
   flutter:
     sdk: flutter
 
