@@ -15,8 +15,9 @@ import { tanzaScope } from '../../shared/utils/tanza.js';
 import type { AuthContext, AuthRole } from '../../shared/types/http.js';
 import { emitEmergencyEvent } from './events.js';
 import {
-  canResponderHandleEmergency,
+  canResponderHandleIncident,
   emergencyTypesForResponder,
+  HARDWARE_SOURCES,
 } from './responderRoleAccess.js';
 import type {
   AssignBody,
@@ -182,6 +183,10 @@ export async function listActive(args: ListActiveQuery, auth: AuthContext) {
       filter.$or = [
         { assignedResponderId: new mongoose.Types.ObjectId(auth.accountId) },
         { type: { $in: allowedTypes } },
+        // Hardware presses are nobody's speciality and everybody's business:
+        // the feed must list what the socket already delivered, or the alert
+        // vanishes on the next refresh. See `isHardwareSourced`.
+        { source: { $in: [...HARDWARE_SOURCES] } },
       ];
     }
   }
@@ -256,7 +261,7 @@ async function loadAccessible(id: string, auth: AuthContext): Promise<IEmergency
       const responder = await Responder.findById(auth.accountId)
         .select('responderRole department agencyType')
         .lean();
-      if (!responder || !canResponderHandleEmergency(responder, doc.type)) {
+      if (!responder || !canResponderHandleIncident(responder, doc)) {
         throw new AppError('Emergency is outside responder role', 403, 'OUT_OF_ROLE');
       }
     }
@@ -323,7 +328,7 @@ export async function canSubscribeToEmergency(
   // an incident that does not exist is never right, and letting it through
   // leaves a client collecting rooms that will never carry an event.
   const doc = await Emergency.findById(emergencyId)
-    .select('userId assignedResponderId type status')
+    .select('userId assignedResponderId type source status')
     .lean();
   if (!doc) return false;
 
@@ -339,7 +344,7 @@ export async function canSubscribeToEmergency(
     const responder = await Responder.findById(auth.accountId)
       .select('responderRole department agencyType')
       .lean();
-    return !!responder && canResponderHandleEmergency(responder, doc.type);
+    return !!responder && canResponderHandleIncident(responder, doc);
   }
 
   return false;
@@ -460,7 +465,7 @@ export async function assign(
   }
   if (
     auth.role === 'responder' &&
-    !canResponderHandleEmergency(responder, doc.type)
+    !canResponderHandleIncident(responder, doc)
   ) {
     throw new AppError(
       'Emergency is outside your responder role',

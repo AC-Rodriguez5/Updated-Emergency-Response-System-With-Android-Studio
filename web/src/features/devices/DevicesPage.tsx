@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -18,7 +18,6 @@ import { Badge } from '@/components/ui/Badge';
 import { StatCard } from '@/components/ui/StatCard';
 import { TableSkeleton } from '@/components/ui/Skeleton';
 import { api } from '@/services/apiClient';
-import { getSocket } from '@/services/socketClient';
 import { fmt, sinceLabel } from '@/lib/utils';
 import type { DeviceFleet, DeviceLinkStatus, PanicDevice } from '@/types';
 
@@ -77,7 +76,11 @@ export default function DevicesPage() {
   const [needsAttention, setNeedsAttention] = useState(false);
   const [search, setSearch] = useState('');
 
-  const { data, isLoading, refetch } = useQuery({
+  // Liveness is not arranged here any more. `RealtimeProvider` maps every
+  // backend event onto the query keys it invalidates, so this page is current
+  // because it reads the cache — not because it remembered to subscribe. The
+  // interval below is only a safety net for a socket that is down.
+  const { data, isLoading } = useQuery({
     queryKey: ['admin-devices', filter, needsAttention, search],
     queryFn: async () => {
       const params = new URLSearchParams({ limit: '100', status: filter });
@@ -90,21 +93,6 @@ export default function DevicesPage() {
     // show a stale "just now".
     refetchInterval: 30_000,
   });
-
-  useEffect(() => {
-    const socket = getSocket();
-    if (!socket) return;
-    const handler = () => void refetch();
-    // A device that raises an alert or streams a fix has just been heard from.
-    socket.on('emergency.iot_device_created', handler);
-    socket.on('emergency.location_updated', handler);
-    socket.on('emergency.resolved', handler);
-    return () => {
-      socket.off('emergency.iot_device_created', handler);
-      socket.off('emergency.location_updated', handler);
-      socket.off('emergency.resolved', handler);
-    };
-  }, [refetch]);
 
   const devices = data?.items ?? [];
   const summary = data?.summary;

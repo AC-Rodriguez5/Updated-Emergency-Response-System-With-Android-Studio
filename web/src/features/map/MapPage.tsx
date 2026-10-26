@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/Badge';
 import { AuthedImage } from '@/components/ui/AuthedImage';
 import { api } from '@/services/apiClient';
-import { getSocket } from '@/services/socketClient';
+import { onSocketEvents } from '@/services/socketClient';
 import { useNotifications } from '@/features/notifications/NotificationProvider';
 import { fmt, hasCoordinates, locationLabel, sourceLabel } from '@/lib/utils';
 import { TANZA_CENTER, TANZA_ZOOM } from '@/styles/tokens';
@@ -122,7 +122,9 @@ export default function MapPage() {
       const { data } = await api.get<{ data: Paginated<Emergency> }>('/emergencies/active?limit=100');
       return data.data.items;
     },
-    refetchInterval: 20_000,
+    // Every incident change arrives on the socket and is applied above. This is
+    // the backstop for a socket that is down, not the way the map keeps up.
+    refetchInterval: 60_000,
   });
 
   useEffect(() => {
@@ -135,7 +137,9 @@ export default function MapPage() {
       const { data } = await api.get<{ data: ResponderLiveLocation[] }>('/responders/locations/live');
       return data.data;
     },
-    refetchInterval: 3_000,
+    // Was three seconds — a poll that fast is what you need when you do not
+    // trust the stream. Positions now arrive as they are ingested.
+    refetchInterval: 60_000,
   });
 
   useEffect(() => {
@@ -155,9 +159,6 @@ export default function MapPage() {
   }, [emergencies, focusedEmergencyId, stopEmergencyAlert]);
 
   useEffect(() => {
-    const socket = getSocket();
-    if (!socket) return;
-
     const upsert = async (payload: { emergencyId: string }) => {
       try {
         const { data } = await api.get<{ data: Emergency }>(`/emergencies/${payload.emergencyId}`);
@@ -177,29 +178,33 @@ export default function MapPage() {
       setSelected((s) => s?._id === payload.emergencyId ? null : s);
     };
 
-    socket.on('emergency.created', upsert);
-    socket.on('emergency.iot_keychain_created', upsert);
-    socket.on('emergency.iot_device_created', upsert);
-    socket.on('emergency.location_updated', upsert);
-    socket.on('emergency.updated', upsert);
-    socket.on('emergency.assigned', upsert);
-    socket.on('emergency.resolved', remove);
+    // Subscribed through the client's own registry rather than off a socket
+    // handle. `getSocket()` is null until the session is restored, and this
+    // effect used to return on that — leaving the map polling for the rest of
+    // the session, with a panic-button pin appearing up to twenty seconds late.
+    const offUpserts = onSocketEvents<{ emergencyId: string }>(
+      [
+        'emergency.created',
+        'emergency.iot_keychain_created',
+        'emergency.iot_device_created',
+        'emergency.location_updated',
+        'emergency.updated',
+        'emergency.assigned',
+      ],
+      (payload) => void upsert(payload),
+    );
+    const offResolved = onSocketEvents<{ emergencyId: string }>(
+      ['emergency.resolved'],
+      remove,
+    );
 
     return () => {
-      socket.off('emergency.created', upsert);
-      socket.off('emergency.iot_keychain_created', upsert);
-      socket.off('emergency.iot_device_created', upsert);
-      socket.off('emergency.location_updated', upsert);
-      socket.off('emergency.updated', upsert);
-      socket.off('emergency.assigned', upsert);
-      socket.off('emergency.resolved', remove);
+      offUpserts();
+      offResolved();
     };
   }, []);
 
   useEffect(() => {
-    const socket = getSocket();
-    if (!socket) return;
-
     const upsertResponder = (payload: {
       responderId: string;
       name?: string;
@@ -243,12 +248,10 @@ export default function MapPage() {
       });
     };
 
-    socket.on('location.responder_updated', upsertResponder);
-    socket.on('responder.status_updated', upsertResponder);
-    return () => {
-      socket.off('location.responder_updated', upsertResponder);
-      socket.off('responder.status_updated', upsertResponder);
-    };
+    return onSocketEvents<Parameters<typeof upsertResponder>[0]>(
+      ['location.responder_updated', 'responder.status_updated'],
+      upsertResponder,
+    );
   }, []);
 
   // Incidents the map cannot plot yet. Without this strip a fingerprint-authorized

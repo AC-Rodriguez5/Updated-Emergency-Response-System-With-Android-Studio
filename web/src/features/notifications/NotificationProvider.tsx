@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import { api } from '@/services/apiClient';
-import { connectSocket } from '@/services/socketClient';
+import { connectSocket, onSocketEvents } from '@/services/socketClient';
 import { useAuth } from '@/features/auth/useAuth';
 import {
   hasActiveEmergencyAlert,
@@ -159,7 +159,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isAdmin) return;
-    const socket = connectSocket();
+    connectSocket();
 
     const onCreated = (notif: AdminNotification) => {
       setList((prev) => {
@@ -200,23 +200,27 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    socket.on('admin_notification.created', onCreated);
-    socket.on('emergency.created', refresh);
-    socket.on('emergency.iot_keychain_created', refresh);
-    socket.on('emergency.iot_device_created', refresh);
-    socket.on('emergency.assigned', refresh);
-    socket.on('emergency.resolved', refresh);
-    socket.on('emergency.responder_report', refresh);
-    socket.on('emergency.update_requested', refresh);
+    // Through the client's registry, so the subscription survives a socket
+    // being rebuilt — which is what a sign-out and sign-in in one session does.
+    const offCreated = onSocketEvents<AdminNotification>(
+      ['admin_notification.created'],
+      onCreated,
+    );
+    const offRefresh = onSocketEvents(
+      [
+        'emergency.created',
+        'emergency.iot_keychain_created',
+        'emergency.iot_device_created',
+        'emergency.assigned',
+        'emergency.resolved',
+        'emergency.responder_report',
+        'emergency.update_requested',
+      ],
+      () => void refresh(),
+    );
     return () => {
-      socket.off('admin_notification.created', onCreated);
-      socket.off('emergency.created', refresh);
-      socket.off('emergency.iot_keychain_created', refresh);
-      socket.off('emergency.iot_device_created', refresh);
-      socket.off('emergency.assigned', refresh);
-      socket.off('emergency.resolved', refresh);
-      socket.off('emergency.responder_report', refresh);
-      socket.off('emergency.update_requested', refresh);
+      offCreated();
+      offRefresh();
     };
   }, [isAdmin, queueToast, refresh]);
 

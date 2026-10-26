@@ -9,7 +9,10 @@ import { seedAmbulanceUnits } from './seed/ambulanceUnits.js';
 import { verifyAccessToken } from './modules/auth/jwt.js';
 import type { AuthContext, AuthRole } from './shared/types/http.js';
 import { Responder } from './models/index.js';
-import { emergencyTypesForResponder } from './modules/emergencies/responderRoleAccess.js';
+import {
+  RESPONDER_BROADCAST_ROOM,
+  emergencyTypesForResponder,
+} from './modules/emergencies/responderRoleAccess.js';
 import { canSubscribeToEmergency } from './modules/emergencies/emergencies.service.js';
 import { startDispatchWatchdog } from './modules/emergencies/dispatch.watchdog.js';
 import { startRetentionSweep } from './modules/retention/index.js';
@@ -23,6 +26,10 @@ async function autoJoinRooms(socket: Socket & { data: SocketData }, auth: AuthCo
   if (role === 'user') socket.join(`user:${accountId}`);
   if (role === 'responder') {
     socket.join(`responder:${accountId}`);
+    // Joined before the role lookup, and regardless of its outcome: an
+    // untriaged panic-button press has to reach a responder whose role covers
+    // nothing in particular as surely as one whose role covers everything.
+    socket.join(RESPONDER_BROADCAST_ROOM);
     const responder = await Responder.findById(accountId)
       .select('responderRole department agencyType')
       .lean();

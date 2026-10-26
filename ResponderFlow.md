@@ -66,8 +66,17 @@ joins rooms by role (`backend/src/server.ts:29`):
 | Role | Rooms joined |
 |---|---|
 | user | `user:<id>` |
-| responder | `responder:<id>`, plus `responder-feed:<type>` for every type their role covers |
+| responder | `responder:<id>`, `responder-feed:all`, plus `responder-feed:<type>` for every type their role covers |
 | admin | `admin:live` |
+
+`responder-feed:all` carries the one kind of alert that is nobody's speciality.
+A wearable has one button and no way to ask what happened, so the backend files
+its presses as `general_sos` - a placeholder the schema needs, not a triage
+decision. Routed through the type feed, that placeholder delivered every
+hardware alert to MDRRMO and rescue accounts and **to nobody else**: a medic, a
+firefighter or a police responder on duty two streets away was never told.
+Hardware-sourced incidents now also go to this room, which every responder
+joins regardless of role (`isHardwareSourced`, `responderRoleAccess.ts`).
 
 A socket without a valid access token is refused at the handshake — there is nothing an
 anonymous client should be listening to here. `join:emergency` is allowed for one incident
@@ -97,8 +106,30 @@ holding the phone learn the same fact at the same moment.
 
 Duty is what makes a responder visible and dispatchable on the admin side.
 
-- The Duty tab toggles it: `POST /responders/duty { status }`, and starting duty also
-  starts the GPS broadcast (`duty_status_screen.dart:49`, `duty_provider.dart:22`).
+- The Duty tab toggles it: `POST /responders/duty { status }`. The switch moves only
+  after the backend answers - a failed POST leaves it where it was and says why,
+  because a phone reading "ON DUTY" while dispatch reads off duty sends the next
+  call somewhere else (`duty_provider.dart`, `setOnDuty`).
+- **Going on duty starts an Android foreground service** (`core/duty/duty_service.dart`).
+  It holds the process alive, owns the one incident socket, streams duty location,
+  and raises the alarm through `core/notifications/alert_notifications.dart` -
+  max-importance channel on the alarm audio stream, with a full-screen intent, so a
+  press at 02:00 wakes a phone in a pocket. Before this the socket lived only in the
+  UI isolate: it worked while somebody was looking at the screen and stopped when
+  Android idled the process, which is most of a shift, and nothing rang even when it
+  was open.
+- Only one of the two ever holds a socket. Refresh tokens rotate and the old one is
+  revoked on use, so two isolates renewing the same pair can revoke each other and
+  sign a responder out mid-shift. While the service runs, `IncidentSocket` drops its
+  own connection and relays the service's events into the same stream the screens
+  already read, so nothing above it knows which is dialling.
+- Duty survives a restart. The responder record carries `dutyStatus`, and
+  `DutyNotifier` hydrates from it and restarts the service if the backend still has
+  them on duty - an app that came back reading OFF DUTY while dispatch disagreed was
+  the same bug in the other direction. `isOnDuty` on the app's model now matches the
+  backend's live set (`on_duty`, `available`, `busy`, `responding`); it used to read
+  only the first and third, so a responder whose last call had just been resolved
+  came back as off duty.
 - The app only ever sends `on_duty` or `off_duty`. The backend accepts a wider set
   (`off_duty`, `on_duty`, `busy`, `available`, `responding`, `inactive`, `unavailable`,
   `offline` — `locations.routes.ts:16`) and **moves the responder through the rest by
@@ -113,9 +144,11 @@ Duty is what makes a responder visible and dispatchable on the admin side.
 Each of those writes emits `responder.status_updated` to `admin:live`, which the dashboard
 map consumes live (`MapPage.tsx:247`).
 
-**Location** — while on duty, `LocationService` streams positions every 10 m of movement to
-`POST /locations/responder`, optionally tagged with the incident or ambulance request being
-served (`location_sharing/service/location_service.dart`). The backend stores the last 100
+**Location** — while on duty, positions go to `POST /locations/responder` every 10 m of
+movement, optionally tagged with the incident or ambulance request being served. The
+stream belongs to the duty service rather than to a screen, for the same reason the
+socket does; `LocationService` hands it the tag instead of opening a second GPS stream
+(`location_sharing/service/location_service.dart`). The backend stores the last 100
 fixes per responder and emits `location.responder_updated` to `admin:live`
 (`locations.service.ts:125`). The dashboard reads the roster from
 `GET /responders/locations/live` and then follows the socket.
@@ -347,7 +380,12 @@ medical → `medical`, MDRRMO/rescue/barangay → `general_sos`.
   (`canHandleEmergencyType`).
 - **Self-accept** is strict: it requires an explicit role match (`canSelfAssign`). Out of
   role, the sheet shows *"Outside your role — only admin can assign this to you."* and the
-  backend independently refuses with `OUT_OF_ROLE` (`emergencies.service.ts:364`).
+  backend independently refuses with `OUT_OF_ROLE` (`emergencies.service.ts`).
+- **A hardware alert is outside this entirely.** Nobody chose its category, so it is
+  visible to and acceptable by every responder — in the socket fan-out, in
+  `GET /emergencies/active`, in the incident room, and in `assign`. All four had to
+  agree or the alert arrived and then vanished on the next refresh; the four are
+  pinned down in `hardware-reach.test.ts`.
 - An **admin assignment overrides role entirely** — the admin branch of `assign` skips the
   role check. This is the intended escape hatch when the right unit is not the obvious one.
 
@@ -398,6 +436,19 @@ page picks the unit and the responder from approved, active responders and follo
 | **Ambulance** | `/admin/ambulance-requests` | approve, reject, assign unit + responder |
 | **Audit** | `/admin/audit` | — |
 
+The dashboard no longer arranges its own liveness page by page.
+`features/realtime/RealtimeProvider.tsx` maps every backend event onto the query
+keys it invalidates, mounted once above the router, so a page is current because
+it reads the query cache. Each page used to subscribe for itself, and the result
+was a console whose liveness depended on which page you were on — **Dispatch
+subscribed to nothing at all** and learned about a new emergency on its next
+15-second poll. Subscriptions also live in `services/socketClient.ts` now rather
+than on a socket handle: `getSocket()` returns null until the session is
+restored, and every page that bailed on that stayed deaf for the rest of the
+session. Intervals are kept only as a backstop for a socket that is down, and a
+reconnect re-reads everything, since events that arrived while it was away went
+to nobody.
+
 Every responder action also writes an `AuditLog` row — `emergency.assigned`,
 `emergency.on_the_way`, `emergency.report_filed`, `ambulance_request.*` — with actor, IP,
 user agent and request ID, which is what the Audit page reads.
@@ -415,7 +466,7 @@ U = resident app):
 | Event | Raised when | R | A | U |
 |---|---|:-:|:-:|:-:|
 | `emergency.created` | resident raises an alert | ✓ | ✓ | ✓ |
-| `emergency.iot_device_created` | wearable raises an alert | ✓ | ✓ | ✓ |
+| `emergency.iot_device_created` | wearable raises an alert | all | ✓ | ✓ |
 | `emergency.location_updated` | a new fix lands on an open incident | ✓ | ✓ | ✓ |
 | `emergency.updated` | incident edited | ✓ | ✓ | ✓ |
 | `emergency.assigned` | self-accept or admin dispatch | ✓ | ✓ | ✓ |
@@ -436,6 +487,9 @@ U = resident app):
 | `ambulance_request.*` | transport pipeline steps | — | ✓ | ✓ |
 | `admin_notification.created` | any notifiable event | — | ✓ | — |
 
+"all" in the R column means every responder, not only those whose role covers the
+incident's type — see `responder-feed:all` in section 2.
+
 ---
 
 ## 8. Known gaps
@@ -444,20 +498,24 @@ Honest list of places where the parts do not line up. None of these break the ma
 
 1. **`emergency.iot_keychain_created` is never emitted**, though all three clients
    listen for it and the notification service handles it.
-2. **The duty toggle swallows its own errors.** `_syncDutyStatus` catches and discards
-   everything (`duty_provider.dart:25`), so if the POST fails the switch still reads
-   "on duty" while the dashboard shows the responder as off duty.
-3. **The field report sends no `reportType`.** The app concatenates its three fields into
+2. **The field report sends no `reportType`.** The app concatenates its three fields into
    one `note`; the backend accepts an optional `reportType` that nothing populates.
-4. **A stale web responder console is still in the tree.** `web/src/App.tsx`,
+3. **A stale web responder console is still in the tree.** `web/src/App.tsx`,
    `pages/ResponderLogin.tsx` and `pages/ResponderDashboard.tsx` are an older browser-based
    responder surface that nothing mounts — `web/src/main.tsx` renders `app/App.tsx`, the
    admin dashboard. It even keeps its own token under a different key (`responderToken`).
    Dead code, but it reads as a second responder client if you go looking.
-5. **Report deduplication is time-based.** An identical note from the same responder within
+4. **Report deduplication is time-based.** An identical note from the same responder within
    10 s is silently dropped and the existing incident returned
    (`emergencies.service.ts:454`) — a retry after a network blip is safe, but a genuine
    repeated note inside that window is lost.
+5. **Registrations raise no event.** Approvals is the one admin page with nothing to
+   subscribe to: a new responder registration appears on a window focus or a manual
+   refresh, not by itself. Adding `registration.created` to the event stream would
+   close it.
+6. **There is no push.** Alerts reach a responder over the duty service's socket, so a
+   phone with the app force-stopped from Settings, or an OEM battery manager that kills
+   foreground services, hears nothing. FCM is the only fix for that class of failure.
 
 ---
 
@@ -475,4 +533,5 @@ Honest list of places where the parts do not line up. None of these break the ma
 | Response history | `features/history/**` | `emergencies.service.ts` (`listResolvedForResponder`) | — |
 | Dispatch watchdog | — | `modules/emergencies/dispatch.watchdog.ts` | `features/dispatch/DispatchPage.tsx` |
 | Ambulance | `features/ambulance_assignments/**` | `modules/ambulance/**` | `features/ambulance_requests/**` |
-| Realtime | `emergency_map_screen.dart` (`_connectSocket`) | `server.ts`, `modules/emergencies/events.ts` | `services/socketClient.ts` |
+| Realtime | `core/realtime/incident_socket.dart`, `core/realtime/incident_events.dart` | `server.ts`, `modules/emergencies/events.ts` | `services/socketClient.ts`, `features/realtime/RealtimeProvider.tsx` |
+| Staying reachable on duty | `core/duty/duty_service.dart`, `core/notifications/alert_notifications.dart` | — | — |

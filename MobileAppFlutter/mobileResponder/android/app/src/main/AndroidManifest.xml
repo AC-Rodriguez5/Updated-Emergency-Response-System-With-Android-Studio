@@ -10,8 +10,16 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+    <!-- The duty service holds a socket as well as a GPS stream. Android 14
+         refuses to start a foreground service whose declared type it has no
+         permission for, so both are declared. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
+    <!-- Puts an emergency alert over the lock screen, which is the state the
+         phone is in for most of a shift. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
 
     <application
@@ -35,11 +43,15 @@
             </intent-filter>
         </activity>
 
+        <!-- stopWithTask=false: swiping the app out of recents must not end a
+             duty session. The responder ends their shift on the Duty tab, and
+             nowhere else. -->
         <service
             android:name="id.flutter.flutter_background_service.BackgroundService"
-            android:foregroundServiceType="location"
+            android:foregroundServiceType="location|dataSync"
             android:exported="true"
-            tools:replace="android:exported"/>
+            android:stopWithTask="false"
+            tools:replace="android:exported,android:foregroundServiceType"/>
 
         <receiver android:name="id.flutter.flutter_background_service.BootReceiver" android:exported="true">
             <intent-filter>

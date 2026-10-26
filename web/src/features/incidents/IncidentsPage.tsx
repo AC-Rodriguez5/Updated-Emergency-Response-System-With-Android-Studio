@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, MapPin, CheckCircle, FileText, MessageSquare, Undo2, Send } from 'lucide-react';
 import { AdminShell } from '@/components/layout/AdminShell';
@@ -11,7 +11,6 @@ import {
 import { TableSkeleton } from '@/components/ui/Skeleton';
 import { Modal } from '@/components/ui/Modal';
 import { api } from '@/services/apiClient';
-import { getSocket } from '@/services/socketClient';
 import { fmt, isHardwareSource, locationLabel, sourceLabel } from '@/lib/utils';
 import type { Emergency, Paginated } from '@/types';
 
@@ -27,7 +26,11 @@ export default function IncidentsPage() {
   const [draft, setDraft] = useState('');
   const [tellResident, setTellResident] = useState(false);
 
-  const { data, isLoading, refetch } = useQuery({
+  // Liveness is not arranged here any more. `RealtimeProvider` maps every
+  // backend event onto the query keys it invalidates, so this page is current
+  // because it reads the cache — not because it remembered to subscribe. The
+  // interval below is only a safety net for a socket that is down.
+  const { data, isLoading } = useQuery({
     queryKey: ['active-emergencies-full', filter],
     queryFn: async () => {
       const params = new URLSearchParams({ limit: '100' });
@@ -37,46 +40,8 @@ export default function IncidentsPage() {
       if (filter === 'critical') items = items.filter((e) => e.priority === 'critical');
       return items;
     },
-    refetchInterval: 20_000,
+    refetchInterval: 60_000,
   });
-
-  useEffect(() => {
-    const socket = getSocket();
-    if (!socket) return;
-    const handler = () => void refetch();
-    socket.on('emergency.created', handler);
-    socket.on('emergency.updated', handler);
-    socket.on('emergency.responder_report', handler);
-    socket.on('emergency.update_requested', handler);
-    socket.on('emergency.released', handler);
-    socket.on('emergency.assignment_acknowledged', handler);
-    socket.on('emergency.assignment_expired', handler);
-    socket.on('emergency.dispatch_overdue', handler);
-    socket.on('emergency.message', handler);
-    socket.on('emergency.responder_arrived', handler);
-    socket.on('emergency.resolved', handler);
-    socket.on('emergency.iot_keychain_created', handler);
-    socket.on('emergency.iot_device_created', handler);
-    // A panic button streams fixes for the whole life of its incident; each one
-    // can turn "Waiting for GPS" into a real position in this table.
-    socket.on('emergency.location_updated', handler);
-    return () => {
-      socket.off('emergency.created', handler);
-      socket.off('emergency.updated', handler);
-      socket.off('emergency.responder_report', handler);
-      socket.off('emergency.update_requested', handler);
-      socket.off('emergency.released', handler);
-      socket.off('emergency.assignment_acknowledged', handler);
-      socket.off('emergency.assignment_expired', handler);
-      socket.off('emergency.dispatch_overdue', handler);
-      socket.off('emergency.message', handler);
-      socket.off('emergency.responder_arrived', handler);
-      socket.off('emergency.resolved', handler);
-      socket.off('emergency.iot_keychain_created', handler);
-      socket.off('emergency.iot_device_created', handler);
-      socket.off('emergency.location_updated', handler);
-    };
-  }, [refetch]);
 
   const resolveMutation = useMutation({
     mutationFn: async ({ id, notes }: { id: string; notes?: string }) => {
