@@ -188,7 +188,7 @@ void main() {
     AssignedResponder? parse(Map<String, dynamic>? payload) =>
         EmergencyModel.fromJson({
           ...emergencyJson(),
-          if (payload != null) 'assignedResponder': payload,
+          'assignedResponder': ?payload,
         }).assignedResponder;
 
     test('an unassigned emergency has no responder', () {

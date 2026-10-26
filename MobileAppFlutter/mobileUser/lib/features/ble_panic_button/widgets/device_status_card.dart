@@ -17,6 +17,8 @@ class DeviceStatusCard extends ConsumerWidget {
         ? (AppColors.successGreen, 'Connected', Icons.bluetooth_connected)
         : ble.connection == BleConnectionState.scanning
         ? (AppColors.warningAmber, 'Scanning...', Icons.bluetooth_searching)
+        : ble.connection == BleConnectionState.connecting
+        ? (AppColors.warningAmber, 'Connecting...', Icons.bluetooth_searching)
         : (AppColors.textMuted, 'Not connected', Icons.bluetooth_disabled);
 
     return Material(

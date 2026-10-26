@@ -23,6 +23,7 @@ void main() async {
   await Hive.openBox<String>('offline_queue');
   await Hive.openBox<String>('pending_alerts');
   await Hive.openBox<String>('active_emergency');
+  await Hive.openBox<String>('wearable_settings');
   await Hive.openBox<String>(ServerConfigStore.boxName);
   // Before runApp, so the very first request goes to the saved address.
   ServerConfigStore.restore();
@@ -80,13 +81,15 @@ class _TanzAlertAppState extends ConsumerState<TanzAlertApp>
 
   void _handleAuthState(AuthState state) {
     if (state is AuthAuthenticated) {
+      ref.read(bleServiceProvider.notifier).setOwner(state.user.id);
       unawaited(_startEmergencySession());
     } else if (state is AuthUnauthenticated || state is AuthPending) {
       _disconnectEmergencySocket();
       final ble = ref.read(bleServiceProvider.notifier);
       ble.onEmergency = null;
       ble.onDeviceLocation = null;
-      unawaited(ble.disconnect());
+      ble.setOwner(null);
+      unawaited(ble.disconnect(clearState: true));
       ref.read(emergencyProvider.notifier).reset();
     }
   }
@@ -122,6 +125,9 @@ class _TanzAlertAppState extends ConsumerState<TanzAlertApp>
           tracking: em.trackingActive,
         );
       };
+      if (ref.read(bleServiceProvider).deviceId != null) {
+        unawaited(ble.reconnect());
+      }
       await ble.retryQueuedEvents();
       await ref.read(emergencyProvider.notifier).loadActiveEmergency();
       await _connectEmergencySocket();
@@ -199,9 +205,10 @@ class _TanzAlertAppState extends ConsumerState<TanzAlertApp>
   void _renewAndReconnect() {
     if (_socketRenewal != null) return;
     const backoff = [3, 5, 10, 20, 30];
-    final seconds = backoff[_socketAttempt < backoff.length
-        ? _socketAttempt
-        : backoff.length - 1];
+    final seconds =
+        backoff[_socketAttempt < backoff.length
+            ? _socketAttempt
+            : backoff.length - 1];
     _socketAttempt++;
 
     _socketRenewal = Timer(Duration(seconds: seconds), () async {

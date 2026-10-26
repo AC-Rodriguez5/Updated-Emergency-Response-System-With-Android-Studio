@@ -1,310 +1,408 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
 import '../../../../core/theme/app_colors.dart';
-import '../../../../core/widgets/app_button.dart';
 import '../service/ble_service.dart';
 
 class BlePairingScreen extends ConsumerWidget {
   const BlePairingScreen({super.key});
 
+  Future<void> _run(
+    BuildContext context,
+    Future<void> Function() action,
+  ) async {
+    try {
+      await action();
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error.toString().replaceFirst('Bad state: ', '')),
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ble = ref.watch(bleServiceProvider);
     final controller = ref.read(bleServiceProvider.notifier);
-    final enrolling =
-        ble.enrollmentStatus == 'starting' ||
-        ble.enrollmentStatus == 'place_first' ||
-        ble.enrollmentStatus == 'remove_finger' ||
-        ble.enrollmentStatus == 'place_second';
-
+    final connected = ble.isConnected;
+    final color = connected ? AppColors.successGreen : AppColors.responderBlue;
+    final status = switch (ble.connection) {
+      BleConnectionState.connected => 'Connected to this phone',
+      BleConnectionState.connecting => 'Connecting to wearable...',
+      BleConnectionState.scanning => 'Searching nearby...',
+      _ => ble.deviceId == null ? 'Add your wearable' : 'Phone disconnected',
+    };
     return Scaffold(
-      appBar: AppBar(title: const Text('TanzAlert device')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _DeviceCard(ble: ble),
-            if (ble.message != null) ...[
-              const SizedBox(height: 12),
-              _Notice(message: ble.message!),
-            ],
-            const SizedBox(height: 24),
-            if (!ble.isConnected) ...[
-              const Text(
-                'Pair your wearable',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+      appBar: AppBar(
+        title: const Text('My wearable'),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh device status',
+            onPressed: connected ? controller.refreshStatus : null,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: color.withValues(alpha: 0.25)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.watch_outlined, size: 40, color: color),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Text(
+                        ble.deviceName ?? 'TanzAlert wearable',
+                        style: const TextStyle(
+                          fontSize: 21,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  status,
+                  style: TextStyle(color: color, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  connected
+                      ? 'Your phone can relay SOS alerts while the app is running.'
+                      : 'Standalone SOS uses the SIM inside your wearable. Phone mobile data works only when Bluetooth is connected.',
+                  style: const TextStyle(height: 1.5),
+                ),
+                const SizedBox(height: 18),
+                if (ble.isBusy) const LinearProgressIndicator(),
+                if (!connected && !ble.isBusy) ...[
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () => _run(
+                        context,
+                        ble.deviceId == null
+                            ? controller.startScan
+                            : controller.reconnect,
+                      ),
+                      icon: Icon(
+                        ble.deviceId == null
+                            ? Icons.search
+                            : Icons.bluetooth_connected,
+                      ),
+                      label: Text(
+                        ble.deviceId == null
+                            ? 'Scan for wearable'
+                            : 'Reconnect',
+                      ),
+                    ),
+                  ),
+                  if (ble.deviceId != null)
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _run(context, controller.startScan),
+                        icon: const Icon(Icons.search),
+                        label: const Text('Scan again'),
+                      ),
+                    ),
+                ],
+                if (ble.isBusy)
+                  TextButton(
+                    onPressed: () => _run(context, controller.disconnect),
+                    child: const Text('Cancel'),
+                  ),
+              ],
+            ),
+          ),
+          if (ble.message != null)
+            _Panel(
+              title: 'Latest update',
+              children: [
+                Text(ble.message!, style: const TextStyle(height: 1.5)),
+              ],
+            ),
+          _Panel(
+            title: 'Send an SOS',
+            children: [
+              Text(
+                connected && !ble.fingerprintRequired
+                    ? 'Tap and release the wearable button to send SOS. Fingerprint verification is temporarily disabled.'
+                    : connected
+                    ? 'This firmware still requires a fingerprint. Install the updated firmware to use button-only SOS.'
+                    : 'With the updated firmware, tap and release the wearable button to send SOS without a fingerprint.',
+                style: const TextStyle(height: 1.5),
               ),
               const SizedBox(height: 8),
               const Text(
-                '1. Power the ESP32 and modem from their correct supplies.\n'
-                '2. Hold the emergency button for 3 seconds. If a finger is already enrolled, scan it first.\n'
-                '3. Keep the device near this phone and scan within 2 minutes.',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: AppColors.textMuted,
-                  height: 1.6,
-                ),
-              ),
-              const SizedBox(height: 24),
-              AppButton(
-                label: ble.connection == BleConnectionState.scanning
-                    ? 'Scanning…'
-                    : 'Scan for device',
-                onPressed: ble.connection == BleConnectionState.scanning
-                    ? null
-                    : () async {
-                        final messenger = ScaffoldMessenger.of(context);
-                        final adapterState =
-                            await FlutterBluePlus.adapterState.first;
-                        if (adapterState != BluetoothAdapterState.on) {
-                          messenger.showSnackBar(
-                            const SnackBar(
-                              content: Text('Please enable Bluetooth first.'),
-                            ),
-                          );
-                          return;
-                        }
-                        await controller.startScan();
-                      },
-                backgroundColor: AppColors.responderBlue,
-              ),
-            ] else ...[
-              const Text(
-                'Device setup',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 12),
-              _ReadinessRow(
-                icon: Icons.fingerprint,
-                label: 'Fingerprint scanner',
-                value: !ble.fingerprintReady
-                    ? 'Not detected'
-                    : ble.fingerprintEnrolled
-                    ? 'Enrolled'
-                    : 'Ready to enroll',
-                ready: ble.fingerprintReady && ble.fingerprintEnrolled,
-              ),
-              _ReadinessRow(
-                icon: Icons.gps_fixed,
-                label: 'Emergency location',
-                value: 'SIM7670/A7670 GNSS',
-                ready: true,
-              ),
-              _ReadinessRow(
-                icon: Icons.cell_tower,
-                label: 'Direct cellular delivery',
-                value: !ble.directCellularEnabled
-                    ? 'Off — this build has no HTTPS API URL'
-                    : ble.serverCertVerified
-                    ? 'On, server certificate verified'
-                    : 'On, but the server certificate is NOT verified',
-                // Deliberately not "ready" when the certificate is unverified:
-                // delivery works, but the device token rides on a session that a
-                // man-in-the-middle could read, and that should not look green.
-                ready: ble.directCellularEnabled && ble.serverCertVerified,
-              ),
-              if (ble.directCellularEnabled)
-                _ReadinessRow(
-                  icon: Icons.sim_card,
-                  label: 'SIM',
-                  value: ble.simBrands.isEmpty
-                      ? 'Reading the SIM…'
-                      : ble.activeApn.isNotEmpty
-                      ? '${ble.simBrands} · APN ${ble.activeApn}'
-                      : ble.cellularOnline
-                      ? '${ble.simBrands} · APN assigned by the network'
-                      : '${ble.simBrands} · APN found on first alert',
-                  // The APN is discovered on the first delivery attempt, so "no APN
-                  // yet" is the normal resting state and should not read as a fault.
-                  ready: ble.simBrands.isNotEmpty &&
-                      !ble.simBrands.startsWith('unknown') &&
-                      !ble.simBrands.startsWith('unrecognised'),
-                ),
-              const SizedBox(height: 20),
-              if (!ble.fingerprintEnrolled)
-                AppButton(
-                  label: enrolling
-                      ? 'Follow the sensor prompts…'
-                      : 'Enroll fingerprint',
-                  onPressed: !ble.fingerprintReady || enrolling
-                      ? null
-                      : () async {
-                          final messenger = ScaffoldMessenger.of(context);
-                          try {
-                            await controller.enrollFingerprint();
-                          } catch (error) {
-                            messenger.showSnackBar(
-                              SnackBar(content: Text(error.toString())),
-                            );
-                          }
-                        },
-                  backgroundColor: AppColors.responderBlue,
-                ),
-              if (!ble.fingerprintEnrolled) const SizedBox(height: 16),
-              const _EmergencyInstructions(),
-              const SizedBox(height: 24),
-              AppOutlinedButton(
-                label: 'Disconnect device',
-                onPressed: () => controller.disconnect(),
+                'Hold for 3 seconds only when setting up the device. A long hold opens setup mode and does not send SOS.',
+                style: TextStyle(color: AppColors.textMuted, height: 1.5),
               ),
             ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DeviceCard extends StatelessWidget {
-  final BleDeviceState ble;
-  const _DeviceCard({required this.ble});
-
-  @override
-  Widget build(BuildContext context) {
-    final connected = ble.isConnected;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: connected ? const Color(0xFFDCFCE7) : AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: connected ? AppColors.successGreen : AppColors.border,
-          width: connected ? 2 : 1,
-        ),
-      ),
-      child: Column(
-        children: [
-          Icon(
-            connected ? Icons.watch : Icons.bluetooth_disabled,
-            color: connected ? AppColors.successGreen : AppColors.textMuted,
-            size: 48,
           ),
-          const SizedBox(height: 12),
-          Text(
-            connected
-                ? (ble.deviceName ?? 'TanzAlert wearable')
-                : 'No device connected',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: connected ? AppColors.successGreen : AppColors.textMuted,
+          if (connected) ...[
+            _Panel(
+              title: 'Device health',
+              children: [
+                _HealthRow(
+                  icon: Icons.touch_app,
+                  title: 'SOS access',
+                  detail: ble.fingerprintRequired
+                      ? 'Fingerprint required by installed firmware'
+                      : 'Button only · temporary repair mode',
+                  ready:
+                      !ble.fingerprintRequired ||
+                      (ble.fingerprintReady && ble.fingerprintEnrolled),
+                ),
+                _HealthRow(
+                  icon: Icons.gps_fixed,
+                  title: 'Wearable GPS',
+                  detail: _gpsMessage(ble),
+                  ready: ble.gpsFix,
+                ),
+                _HealthRow(
+                  icon: Icons.outbox_outlined,
+                  title: 'Undelivered alerts',
+                  detail: ble.pendingCount == 0
+                      ? 'No alerts waiting on the wearable'
+                      : '${ble.pendingCount} waiting for delivery. Keep device powered.',
+                  ready: ble.pendingCount == 0,
+                ),
+              ],
             ),
-          ),
-          if (connected && ble.deviceId != null) ...[
-            const SizedBox(height: 4),
-            Text(
-              ble.deviceId!,
-              style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+            _Panel(
+              title: 'SOS without your phone',
+              children: [
+                _HealthRow(
+                  icon: Icons.cell_tower,
+                  title: 'Standalone cellular',
+                  detail: ble.directCellularEnabled
+                      ? 'Enabled on the wearable'
+                      : 'Not configured. Update cellular settings below.',
+                  ready: ble.directCellularEnabled,
+                ),
+                _HealthRow(
+                  icon: Icons.sim_card_outlined,
+                  title: 'Wearable SIM',
+                  detail: _simMessage(ble),
+                  ready:
+                      ble.simStatus == 1 ||
+                      (ble.simStatus == null && ble.simBrands.isNotEmpty),
+                ),
+                if (ble.activeApn.isNotEmpty)
+                  Text(
+                    'APN: ${ble.activeApn}',
+                    style: const TextStyle(color: AppColors.textMuted),
+                  ),
+                const SizedBox(height: 12),
+                Text(
+                  _cellularMessage(ble),
+                  style: const TextStyle(height: 1.5),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  ble.serverCertVerified
+                      ? 'Server certificate verification configured.'
+                      : 'Server certificate verification is not configured.',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textMuted,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.tonalIcon(
+                    onPressed:
+                        !ble.directCellularEnabled ||
+                            ble.cellularStatus == 'testing' ||
+                            ble.pendingCount > 0
+                        ? null
+                        : () => _run(context, controller.testCellular),
+                    icon: const Icon(Icons.network_check),
+                    label: Text(
+                      ble.cellularStatus == 'testing'
+                          ? 'Checking SIM connection...'
+                          : 'Check SIM connection',
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: ble.cellularStatus == 'testing'
+                        ? null
+                        : () =>
+                              _run(context, controller.updateCellularSettings),
+                    icon: const Icon(Icons.sync),
+                    label: const Text('Update cellular settings'),
+                  ),
+                ),
+                const Text(
+                  'Use a public HTTPS server address in app Settings. Hold the wearable button for 3 seconds, then update here. Repeat if your server address changes.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textMuted,
+                    height: 1.5,
+                  ),
+                ),
+              ],
             ),
-          ],
-          if (ble.isHeartbeatStale) ...[
-            const SizedBox(height: 8),
-            const Text(
-              'Heartbeat lost — check power and Bluetooth',
-              style: TextStyle(
-                fontSize: 12,
-                color: AppColors.warningAmber,
-                fontWeight: FontWeight.w700,
-              ),
+            _Panel(
+              title: 'Device details',
+              children: [
+                Text(ble.deviceId ?? ''),
+                Text('Firmware ${ble.firmwareVersion ?? "unknown"}'),
+                if (ble.lastSeen != null)
+                  Text(
+                    'Last response: ${TimeOfDay.fromDateTime(ble.lastSeen!).format(context)}',
+                  ),
+                TextButton.icon(
+                  onPressed: () => _run(context, controller.disconnect),
+                  icon: const Icon(Icons.bluetooth_disabled),
+                  label: const Text('Disconnect phone'),
+                ),
+              ],
             ),
-          ],
+          ] else
+            _Panel(
+              title: 'Connection help',
+              children: const [
+                Text(
+                  '1. Power the wearable and keep it close to your phone.\n'
+                  '2. Turn on Bluetooth and allow Nearby devices permissions. Older Android phones also need Location enabled.\n'
+                  '3. Disconnect the wearable from any other phone.\n'
+                  '4. For first-time setup, hold its button for 3 seconds, then scan within 2 minutes. A saved wearable can reconnect without setup mode.',
+                  style: TextStyle(height: 1.6),
+                ),
+              ],
+            ),
         ],
       ),
     );
   }
+
+  String _gpsMessage(BleDeviceState ble) {
+    if (ble.gpsHardwareStatus == 2) {
+      return 'GPS module not detected. Check its power and wiring. SOS can send without GPS.';
+    }
+    if (ble.gpsFix) {
+      return 'Location available · ${ble.gpsSatellites} satellites';
+    }
+    return switch (ble.gpsHardwareStatus) {
+      0 => 'Checking GPS connection. SOS can send before a fix.',
+      1 =>
+        'GPS detected · searching for satellites. Move outdoors for a clear sky view.',
+      _ =>
+        'Waiting for GPS · ${ble.gpsSatellites} satellites. SOS can send before a fix.',
+    };
+  }
+
+  String _simMessage(BleDeviceState ble) => switch (ble.simStatus) {
+    0 => 'Checking the inserted SIM...',
+    1 => ble.simBrands.isEmpty ? 'SIM detected' : ble.simBrands,
+    2 => 'No SIM detected. Power off the wearable and insert a SIM.',
+    3 => 'SIM locked. Unlock its PIN/PUK using a phone first.',
+    4 => 'SIM could not be read. Check the SIM; the wearable will retry.',
+    5 => 'Cellular modem not responding. Check its power and wiring.',
+    _ => ble.simBrands.isEmpty ? 'Carrier not detected yet' : ble.simBrands,
+  };
+
+  String _cellularMessage(BleDeviceState ble) => switch (ble.cellularStatus) {
+    'testing' =>
+      'Checking the wearable SIM, network, and server. This does not create an emergency.',
+    'reachable' =>
+      'Server reached through the wearable SIM. No SOS was created. Device-token delivery still needs an end-to-end hardware test.',
+    'delivered' => 'The server accepted the last cellular delivery.',
+    'disabled' || 'https_required' =>
+      'Set a public HTTPS server address and update cellular settings.',
+    'no_data' =>
+      'No mobile data connection. Check the wearable SIM, data package, antenna, and signal.',
+    'tls_error' =>
+      'Secure connection setup failed. Check server certificate settings.',
+    'modem_error' => 'Modem is not ready. Check its power and wiring.',
+    'timeout' =>
+      'Server did not respond. Check signal, data balance, and the saved server address.',
+    'http_error' =>
+      'Last cellular request returned ${ble.lastHttpStatus}. Check the server address and SIM connection; update settings if pairing has changed.',
+    _ =>
+      'Not checked yet. A data package alone does not confirm that the wearable can reach the server.',
+  };
 }
 
-class _Notice extends StatelessWidget {
-  final String message;
-  const _Notice({required this.message});
-
+class _Panel extends StatelessWidget {
+  final String title;
+  final List<Widget> children;
+  const _Panel({required this.title, required this.children});
   @override
   Widget build(BuildContext context) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(12),
+    margin: const EdgeInsets.only(top: 16),
+    padding: const EdgeInsets.all(18),
     decoration: BoxDecoration(
-      color: const Color(0xFFFFF7ED),
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: const Color(0xFFFED7AA)),
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: AppColors.border),
     ),
-    child: Text(message, style: const TextStyle(fontSize: 13, height: 1.4)),
-  );
-}
-
-class _ReadinessRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final bool ready;
-  const _ReadinessRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.ready,
-  });
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 12),
-    child: Row(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, color: ready ? AppColors.successGreen : AppColors.textMuted),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppColors.textMuted,
-                ),
-              ),
-            ],
-          ),
+        Text(
+          title,
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
         ),
-        Icon(
-          ready ? Icons.check_circle : Icons.info_outline,
-          color: ready ? AppColors.successGreen : AppColors.warningAmber,
-          size: 20,
-        ),
+        const SizedBox(height: 12),
+        ...children,
       ],
     ),
   );
 }
 
-class _EmergencyInstructions extends StatelessWidget {
-  const _EmergencyInstructions();
-
+class _HealthRow extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String detail;
+  final bool ready;
+  const _HealthRow({
+    required this.icon,
+    required this.title,
+    required this.detail,
+    required this.ready,
+  });
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: AppColors.background,
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: AppColors.border),
-    ),
-    child: const Column(
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 14),
+    child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Send an emergency',
-          style: TextStyle(fontWeight: FontWeight.w700),
+        Icon(
+          icon,
+          color: ready ? AppColors.successGreen : AppColors.warningAmber,
         ),
-        SizedBox(height: 8),
-        Text(
-          'Scan the enrolled finger. The LED blinks three times when verified. Then tap the emergency button within 30 seconds. The SOS is sent immediately and the device keeps streaming GPS until dispatch resolves the incident.',
-          style: TextStyle(
-            fontSize: 13,
-            color: AppColors.textMuted,
-            height: 1.5,
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 3),
+              Text(
+                detail,
+                style: const TextStyle(color: AppColors.textMuted, height: 1.4),
+              ),
+            ],
           ),
         ),
       ],

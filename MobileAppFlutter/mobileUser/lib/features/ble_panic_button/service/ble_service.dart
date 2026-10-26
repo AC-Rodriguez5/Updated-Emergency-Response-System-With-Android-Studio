@@ -9,7 +9,7 @@ import 'package:hive/hive.dart';
 import '../../../core/config/app_config.dart';
 import '../../../core/networking/api_client.dart';
 
-enum BleConnectionState { off, scanning, connected, disconnected }
+enum BleConnectionState { off, scanning, connecting, connected, disconnected }
 
 class BleDeviceState {
   final BleConnectionState connection;
@@ -20,10 +20,23 @@ class BleDeviceState {
   final DateTime? lastSeen;
   final String? firmwareVersion;
   final bool fingerprintReady;
+  final bool fingerprintRequired;
+  final bool gpsFix;
+  final int gpsSatellites;
+
+  /// Firmware 2.2: 0 checking, 1 receiver detected, 2 not detected; null on legacy firmware.
+  final int? gpsHardwareStatus;
+
+  /// 0 checking, 1 ready, 2 missing, 3 locked, 4 unreadable, 5 modem offline.
+  final int? simStatus;
+  final int pendingCount;
+  final String cellularStatus;
+  final int lastHttpStatus;
   final bool fingerprintEnrolled;
   final bool pairingWindow;
   final bool provisioned;
   final bool directCellularEnabled;
+
   /// True when the wearable has a CA on its modem and therefore authenticates
   /// the backend's certificate. False means encrypted but unverified.
   final bool serverCertVerified;
@@ -50,6 +63,14 @@ class BleDeviceState {
     this.lastSeen,
     this.firmwareVersion,
     this.fingerprintReady = false,
+    this.fingerprintRequired = true,
+    this.gpsFix = false,
+    this.gpsSatellites = 0,
+    this.gpsHardwareStatus,
+    this.simStatus,
+    this.pendingCount = 0,
+    this.cellularStatus = 'not_tested',
+    this.lastHttpStatus = 0,
     this.fingerprintEnrolled = false,
     this.pairingWindow = false,
     this.provisioned = false,
@@ -63,6 +84,9 @@ class BleDeviceState {
   });
 
   bool get isConnected => connection == BleConnectionState.connected;
+  bool get isBusy =>
+      connection == BleConnectionState.scanning ||
+      connection == BleConnectionState.connecting;
   bool get isHeartbeatStale =>
       lastSeen != null &&
       DateTime.now().difference(lastSeen!) >
@@ -77,6 +101,14 @@ class BleDeviceState {
     DateTime? lastSeen,
     String? firmwareVersion,
     bool? fingerprintReady,
+    bool? fingerprintRequired,
+    bool? gpsFix,
+    int? gpsSatellites,
+    int? gpsHardwareStatus,
+    int? simStatus,
+    int? pendingCount,
+    String? cellularStatus,
+    int? lastHttpStatus,
     bool? fingerprintEnrolled,
     bool? pairingWindow,
     bool? provisioned,
@@ -97,6 +129,14 @@ class BleDeviceState {
     lastSeen: lastSeen ?? this.lastSeen,
     firmwareVersion: firmwareVersion ?? this.firmwareVersion,
     fingerprintReady: fingerprintReady ?? this.fingerprintReady,
+    fingerprintRequired: fingerprintRequired ?? this.fingerprintRequired,
+    gpsFix: gpsFix ?? this.gpsFix,
+    gpsSatellites: gpsSatellites ?? this.gpsSatellites,
+    gpsHardwareStatus: gpsHardwareStatus ?? this.gpsHardwareStatus,
+    simStatus: simStatus ?? this.simStatus,
+    pendingCount: pendingCount ?? this.pendingCount,
+    cellularStatus: cellularStatus ?? this.cellularStatus,
+    lastHttpStatus: lastHttpStatus ?? this.lastHttpStatus,
     fingerprintEnrolled: fingerprintEnrolled ?? this.fingerprintEnrolled,
     pairingWindow: pairingWindow ?? this.pairingWindow,
     provisioned: provisioned ?? this.provisioned,
@@ -164,38 +204,129 @@ class BleService extends StateNotifier<BleDeviceState> {
   StreamSubscription<BluetoothConnectionState>? _connSub;
   final List<StreamSubscription<List<int>>> _notifySubscriptions = [];
   Timer? _heartbeatTimer;
+  Timer? _reconnectTimer;
+  bool _manualDisconnect = false;
+  bool _refreshing = false;
+  bool _configuring = false;
+  String? _ownerId;
+  String? _remoteId;
+  int _operation = 0;
+
+  Box<String> get _saved => Hive.box<String>('wearable_settings');
+
+  void setOwner(String? ownerId) {
+    if (_ownerId == ownerId) return;
+    ++_operation;
+    _reconnectTimer?.cancel();
+    _processedEventIds.clear();
+    _ownerId = ownerId;
+    _remoteId = null;
+    state = const BleDeviceState();
+    final raw = ownerId == null ? null : _saved.get(ownerId);
+    if (raw == null) return;
+    try {
+      final saved = jsonDecode(raw) as Map<String, dynamic>;
+      _remoteId = saved['remoteId'] as String?;
+      state = BleDeviceState(
+        deviceId: saved['deviceId'] as String?,
+        serverDeviceId: saved['serverDeviceId'] as String?,
+        deviceName: saved['deviceName'] as String?,
+      );
+    } catch (_) {
+      /* An invalid cache can be repaired by pairing again. */
+    }
+  }
+
+  Future<void> reconnect() async {
+    if (state.isBusy || state.isConnected) return;
+    _manualDisconnect = false;
+    _reconnectTimer?.cancel();
+    if (_remoteId == null) {
+      await startScan();
+      return;
+    }
+    await _connectAndPair(BluetoothDevice.fromId(_remoteId!));
+  }
+
+  void _scheduleReconnect() {
+    _reconnectTimer?.cancel();
+    if (_manualDisconnect || _ownerId == null || _remoteId == null) return;
+    _reconnectTimer = Timer(
+      const Duration(seconds: 8),
+      () => unawaited(reconnect()),
+    );
+  }
+
+  Future<void> _requireBluetooth() async {
+    if (!await FlutterBluePlus.isSupported) {
+      throw StateError('This phone does not support Bluetooth LE.');
+    }
+    final adapter = await FlutterBluePlus.adapterState
+        .where((value) => value != BluetoothAdapterState.unknown)
+        .first
+        .timeout(const Duration(seconds: 5));
+    if (adapter != BluetoothAdapterState.on) {
+      throw StateError('Turn on Bluetooth, then tap Reconnect or Scan.');
+    }
+  }
 
   BleService(this._dio, this._offlineQueue) : super(const BleDeviceState());
 
   Future<void> startScan() async {
+    if (state.isBusy || state.isConnected) return;
+    _manualDisconnect = false;
+    _reconnectTimer?.cancel();
+    final operation = ++_operation;
     await _scanSub?.cancel();
     state = state.copyWith(
       connection: BleConnectionState.scanning,
       clearMessage: true,
     );
     try {
-      _scanSub = FlutterBluePlus.scanResults.listen((results) {
+      await _requireBluetooth();
+      await FlutterBluePlus.stopScan();
+      if (!mounted || operation != _operation) return;
+      _scanSub = FlutterBluePlus.onScanResults.listen((results) {
         if (results.isEmpty ||
             state.connection != BleConnectionState.scanning) {
           return;
         }
-        unawaited(FlutterBluePlus.stopScan());
-        unawaited(_scanSub?.cancel());
-        unawaited(_connectAndPair(results.first.device));
+        final candidates = results
+            .where(
+              (result) =>
+                  result.advertisementData.serviceUuids.any(
+                    (uuid) => uuid == Guid(AppConfig.serviceUuid),
+                  ) ||
+                  result.advertisementData.advName.startsWith('TanzAlert') ||
+                  result.device.remoteId.str == _remoteId,
+            )
+            .toList();
+        if (candidates.isEmpty) return;
+        candidates.sort((a, b) {
+          if (a.device.remoteId.str == _remoteId) return -1;
+          if (b.device.remoteId.str == _remoteId) return 1;
+          return b.rssi.compareTo(a.rssi);
+        });
+        // Claim synchronously so multiple scan callbacks cannot start connections.
+        state = state.copyWith(connection: BleConnectionState.connecting);
+        unawaited(_connectAndPair(candidates.first.device));
       });
       await FlutterBluePlus.startScan(
-        withServices: [Guid(AppConfig.serviceUuid)],
-        timeout: const Duration(seconds: 10),
+        timeout: const Duration(seconds: 15),
+        androidUsesFineLocation: true,
       );
-      await Future<void>.delayed(const Duration(seconds: 11));
-      if (state.connection == BleConnectionState.scanning) {
+      await Future<void>.delayed(const Duration(seconds: 16));
+      if (mounted &&
+          operation == _operation &&
+          state.connection == BleConnectionState.scanning) {
         state = state.copyWith(
           connection: BleConnectionState.disconnected,
           message:
-              'No TanzAlert device was found. Reopen pairing mode and scan again.',
+              'No wearable found. Check its power, keep it nearby, and allow Nearby devices and Location permissions. On older Android phones, turn Location on. Disconnect it from another phone, then scan again.',
         );
       }
     } catch (error) {
+      if (!mounted || operation != _operation) return;
       state = state.copyWith(
         connection: BleConnectionState.disconnected,
         message: 'Bluetooth scan failed: $error',
@@ -204,11 +335,32 @@ class BleService extends StateNotifier<BleDeviceState> {
   }
 
   Future<void> _connectAndPair(BluetoothDevice device) async {
+    final operation = ++_operation;
+    final owner = _ownerId;
+    state = state.copyWith(
+      connection: BleConnectionState.connecting,
+      clearMessage: true,
+    );
     try {
-      await device.connect(autoConnect: false);
-      await device.requestMtu(247);
+      await FlutterBluePlus.stopScan();
+      await _scanSub?.cancel();
+      await _connSub?.cancel();
+      await _requireBluetooth();
+      if (!mounted || operation != _operation) return;
       _device = device;
+      await device.connect(
+        autoConnect: false,
+        timeout: const Duration(seconds: 15),
+      );
+      if (!mounted || operation != _operation) {
+        await device.disconnect();
+        return;
+      }
       final services = await device.discoverServices();
+      if (!mounted || operation != _operation) {
+        await device.disconnect();
+        return;
+      }
       final characteristics = services
           .where(
             (service) =>
@@ -227,60 +379,96 @@ class BleService extends StateNotifier<BleDeviceState> {
       if (deviceId is! String || !deviceId.startsWith('SA-ESP32-')) {
         throw StateError('Device identity is missing or invalid.');
       }
-      if (identity['pairingWindow'] != true) {
-        final enrolled = identity['fingerprintEnrolled'] == true;
-        throw StateError(
-          enrolled
-              ? 'Scan the enrolled finger, then hold the emergency button for 3 seconds.'
-              : 'Hold the emergency button for 3 seconds, then scan again.',
+      if (operation != _operation || owner != _ownerId) return;
+      Map<String, dynamic>? paired;
+      var provisioned = identity;
+      final known =
+          state.deviceId == deviceId &&
+          state.serverDeviceId != null &&
+          identity['provisioned'] == true;
+      if (known) {
+        paired = {'_id': state.serverDeviceId};
+      } else {
+        // Recover existing ownership after an app reinstall without rotating its token.
+        final listed = await _dio.get<Map<String, dynamic>>(
+          '/user/ble-devices',
         );
+        final devices = listed.data?['data'];
+        if (devices is List && identity['provisioned'] == true) {
+          for (final entry in devices) {
+            if (entry is Map<String, dynamic> &&
+                entry['deviceId'] == deviceId &&
+                entry['pairingStatus'] == 'paired') {
+              paired = entry;
+              break;
+            }
+          }
+        }
       }
+      if (paired == null) {
+        if (identity['pairingWindow'] != true) {
+          final enrolled = identity['fingerprintEnrolled'] == true;
+          throw StateError(
+            enrolled && identity['fingerprintRequired'] != false
+                ? 'Scan the enrolled finger, then hold the emergency button for 3 seconds.'
+                : 'Hold the emergency button for 3 seconds, then scan again.',
+          );
+        }
 
-      final response = await _dio.post<Map<String, dynamic>>(
-        '/user/ble-devices/pair',
-        data: {
-          'deviceId': deviceId,
-          'bleServiceUuid': AppConfig.serviceUuid,
-          'firmwareVersion': identity['firmwareVersion'],
-          'fingerprintEnrolled': identity['fingerprintEnrolled'] == true,
-          'directCellularEnabled': AppConfig.directCellularReady,
-        },
-      );
-      final paired = response.data?['data'] as Map<String, dynamic>?;
-      final token = paired?['deviceToken'];
-      if (paired == null || token is! String || token.length < 32) {
-        throw StateError('The server did not return device provisioning data.');
-      }
-      await _configCharacteristic!.write(
-        utf8.encode(
-          jsonEncode({
-            'command': 'provision',
-            'deviceToken': token,
-            'apiBase': AppConfig.apiBaseUrl,
-            'apn': AppConfig.cellularApn,
-            'cellularEnabled': AppConfig.directCellularReady,
-            // The CA's filename on the modem, not its bytes. Empty means the
-            // wearable cannot verify the backend's certificate.
-            'caFile': AppConfig.modemCaFile,
-          }),
-        ),
-        withoutResponse: false,
-      );
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      final provisioned = await _readIdentity();
-      if (provisioned['provisioned'] != true) {
-        throw StateError(
-          'The device rejected provisioning. Reopen pairing mode.',
+        final response = await _dio.post<Map<String, dynamic>>(
+          '/user/ble-devices/pair',
+          data: {
+            'deviceId': deviceId,
+            'bleServiceUuid': AppConfig.serviceUuid,
+            'firmwareVersion': identity['firmwareVersion'],
+            'fingerprintEnrolled': identity['fingerprintEnrolled'] == true,
+            'fingerprintRequired': identity['fingerprintRequired'] != false,
+            'directCellularEnabled': AppConfig.directCellularReady,
+          },
+        );
+        paired = response.data?['data'] as Map<String, dynamic>?;
+        final token = paired?['deviceToken'];
+        if (paired == null || token is! String || token.length < 32) {
+          throw StateError(
+            'The server did not return device provisioning data.',
+          );
+        }
+        await _configCharacteristic!.write(
+          utf8.encode(
+            jsonEncode({
+              'command': 'provision',
+              'deviceToken': token,
+              'apiBase': AppConfig.apiBaseUrl,
+              'apn': AppConfig.cellularApn,
+              'cellularEnabled': AppConfig.directCellularReady,
+              // The CA's filename on the modem, not its bytes. Empty means the
+              // wearable cannot verify the backend's certificate.
+              'caFile': AppConfig.modemCaFile,
+            }),
+          ),
+          withoutResponse: false,
+          allowLongWrite: true,
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        provisioned = await _readIdentity();
+        if (provisioned['provisioned'] != true ||
+            (identity['pv'] != null && provisioned['pv'] == identity['pv'])) {
+          throw StateError(
+            'The device rejected provisioning. Reopen pairing mode.',
+          );
+        }
+        await _dio.patch(
+          '/user/ble-devices/${paired['_id']}/status',
+          data: {
+            'fingerprintEnrolled': provisioned['fingerprintEnrolled'] == true,
+            'fingerprintRequired': provisioned['fingerprintRequired'] != false,
+            'directCellularEnabled':
+                provisioned['directCellularEnabled'] == true,
+            'firmwareVersion': provisioned['firmwareVersion'],
+          },
         );
       }
-      await _dio.patch(
-        '/user/ble-devices/${paired['_id']}/status',
-        data: {
-          'fingerprintEnrolled': provisioned['fingerprintEnrolled'] == true,
-          'directCellularEnabled': provisioned['directCellularEnabled'] == true,
-          'firmwareVersion': provisioned['firmwareVersion'],
-        },
-      );
+      if (!mounted || operation != _operation || owner != _ownerId) return;
 
       state = state.copyWith(
         connection: BleConnectionState.connected,
@@ -292,6 +480,7 @@ class BleService extends StateNotifier<BleDeviceState> {
         lastSeen: DateTime.now(),
         firmwareVersion: provisioned['firmwareVersion']?.toString(),
         fingerprintReady: provisioned['fingerprintReady'] == true,
+        fingerprintRequired: provisioned['fingerprintRequired'] != false,
         fingerprintEnrolled: provisioned['fingerprintEnrolled'] == true,
         pairingWindow: provisioned['pairingWindow'] == true,
         provisioned: true,
@@ -304,24 +493,43 @@ class BleService extends StateNotifier<BleDeviceState> {
             provisioned['enrollmentStatus']?.toString() ?? 'ready',
         clearMessage: true,
       );
+      _remoteId = device.remoteId.str;
+      if (owner != null) {
+        await _saved.put(
+          owner,
+          jsonEncode({
+            'remoteId': _remoteId,
+            'deviceId': deviceId,
+            'serverDeviceId': state.serverDeviceId,
+            'deviceName': state.deviceName,
+          }),
+        );
+      }
       await _subscribe(characteristics);
+      await refreshStatus();
       _startHeartbeatTimer();
       _connSub = device.connectionState.listen((connection) {
+        if (!mounted || operation != _operation) return;
         if (connection == BluetoothConnectionState.disconnected) {
           state = state.copyWith(
             connection: BleConnectionState.disconnected,
-            message: 'TanzAlert device disconnected. Scan to reconnect.',
+            message:
+                'Phone disconnected. Reconnecting automatically while the app is open. Standalone SOS uses the wearable SIM.',
           );
           _heartbeatTimer?.cancel();
+          _scheduleReconnect();
         }
       });
       await retryQueuedEvents();
+      unawaited(_syncDeviceStatus());
     } catch (error) {
-      await disconnect(clearState: false);
+      if (!mounted || operation != _operation) return;
+      await _closeConnection();
       state = state.copyWith(
         connection: BleConnectionState.disconnected,
         message: '$error'.replaceFirst('Bad state: ', ''),
       );
+      _scheduleReconnect();
     }
   }
 
@@ -330,8 +538,19 @@ class BleService extends StateNotifier<BleDeviceState> {
     if (characteristic == null) {
       throw StateError('Device configuration is unavailable.');
     }
-    return jsonDecode(utf8.decode(await characteristic.read()))
-        as Map<String, dynamic>;
+    final identity =
+        jsonDecode(utf8.decode(await characteristic.read()))
+            as Map<String, dynamic>;
+    return {
+      ...identity,
+      'fingerprintRequired':
+          identity['fr'] ?? identity['fingerprintRequired'] ?? true,
+      'cellularStatus': identity['cs'] ?? identity['cellularStatus'],
+      'lastHttpStatus': identity['hs'] ?? identity['lastHttpStatus'],
+      'pendingCount': identity['pc'] ?? identity['pendingCount'],
+      'gpsHardwareStatus': identity['gs'],
+      'simStatus': identity['ss'],
+    };
   }
 
   Future<void> _subscribe(List<BluetoothCharacteristic> characteristics) async {
@@ -406,19 +625,21 @@ class BleService extends StateNotifier<BleDeviceState> {
 
     final emergencyType = event['buttonType'] ?? event['type'] ?? event['t'];
     final fingerprintVerified =
-        event['fingerprintVerified'] == true ||
-        event['authMethod'] == 'fingerprint' ||
-        event['f'] == true;
-    // An unauthenticated or mistyped alert is dropped: only a fingerprint-verified
-    // general SOS from the paired wearable may raise an incident.
-    if (emergencyType != 'general_sos' || !fingerprintVerified) return null;
+        event['fingerprintVerified'] == true || event['f'] == true;
+    final buttonOnly =
+        !state.fingerprintRequired &&
+        (event['fingerprintVerified'] == false || event['f'] == false);
+    if (emergencyType != 'general_sos' ||
+        (!fingerprintVerified && !buttonOnly)) {
+      return null;
+    }
 
     return _HardwareFrame(kind, eventId, {
       'deviceId': deviceId,
       'eventId': eventId,
       'buttonType': 'general_sos',
-      'fingerprintVerified': true,
-      'authMethod': 'fingerprint',
+      'fingerprintVerified': fingerprintVerified,
+      'authMethod': fingerprintVerified ? 'fingerprint' : 'button',
       'transport': 'ble',
       // Omitted rather than sent as null: the API treats the field as optional but
       // rejects an explicit null.
@@ -510,8 +731,8 @@ class BleService extends StateNotifier<BleDeviceState> {
         state = state.copyWith(
           lastSeen: DateTime.now(),
           message: frame.payload['location'] == null
-              ? 'Fingerprint-authorized SOS sent. Waiting for the first GPS fix.'
-              : 'Fingerprint-authorized SOS was saved for delivery.',
+              ? 'SOS sent. Waiting for the first GPS fix.'
+              : 'SOS accepted by the server.',
         );
       }
     } catch (error) {
@@ -643,11 +864,23 @@ class BleService extends StateNotifier<BleDeviceState> {
   /// roughly 20 seconds to boot before the SIM can be read — so a one-shot read at
   /// pairing would permanently show "unknown". This also keeps the GPS and
   /// tracking indicators live.
-  Future<void> _refreshIdentity() async {
-    if (!state.isConnected) return;
+  Future<void> refreshStatus() async {
+    if (!state.isConnected || _refreshing) return;
+    _refreshing = true;
+    final operation = _operation;
     try {
       final latest = await _readIdentity();
+      if (!mounted || operation != _operation || !state.isConnected) return;
       state = state.copyWith(
+        lastSeen: DateTime.now(),
+        fingerprintRequired: latest['fingerprintRequired'] != false,
+        gpsFix: latest['gpsFix'] == true,
+        gpsSatellites: (latest['gpsSatellites'] as num?)?.toInt() ?? 0,
+        gpsHardwareStatus: (latest['gpsHardwareStatus'] as num?)?.toInt(),
+        simStatus: (latest['simStatus'] as num?)?.toInt(),
+        pendingCount: (latest['pendingCount'] as num?)?.toInt() ?? 0,
+        cellularStatus: latest['cellularStatus']?.toString() ?? 'not_tested',
+        lastHttpStatus: (latest['lastHttpStatus'] as num?)?.toInt() ?? 0,
         fingerprintReady: latest['fingerprintReady'] == true,
         fingerprintEnrolled: latest['fingerprintEnrolled'] == true,
         pairingWindow: latest['pairingWindow'] == true,
@@ -659,6 +892,8 @@ class BleService extends StateNotifier<BleDeviceState> {
       );
     } catch (_) {
       // A failed read is not a disconnect; the heartbeat check below owns that.
+    } finally {
+      _refreshing = false;
     }
   }
 
@@ -676,7 +911,8 @@ class BleService extends StateNotifier<BleDeviceState> {
       await _dio.post(
         '/user/ble-devices/$serverDeviceId/checkin',
         data: {
-          if (state.batteryPercent != null) 'batteryPercent': state.batteryPercent,
+          if (state.batteryPercent != null)
+            'batteryPercent': state.batteryPercent,
           if (state.firmwareVersion != null)
             'firmwareVersion': state.firmwareVersion,
         },
@@ -693,37 +929,154 @@ class BleService extends StateNotifier<BleDeviceState> {
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       ticks++;
       // Every third tick, so the extra BLE read costs little.
-      if (ticks % 3 == 0) unawaited(_refreshIdentity());
+      if (ticks % 3 == 0) unawaited(refreshStatus());
       // Every 24th tick — two minutes. The backend treats anything inside five
       // minutes as online, so this tolerates one missed relay.
       if (ticks % 24 == 1) unawaited(_checkIn());
       if (state.isHeartbeatStale && state.isConnected) {
-        state = state.copyWith(
-          connection: BleConnectionState.disconnected,
-          message: 'Heartbeat lost. Check device power and Bluetooth.',
-        );
+        unawaited(_recoverStaleConnection());
       }
     });
   }
 
-  Future<void> disconnect({bool clearState = true}) async {
-    await _scanSub?.cancel();
-    await _connSub?.cancel();
-    for (final subscription in _notifySubscriptions) {
-      await subscription.cancel();
+  Future<void> _recoverStaleConnection() async {
+    _heartbeatTimer?.cancel();
+    state = state.copyWith(
+      connection: BleConnectionState.disconnected,
+      message: 'Device stopped responding. Reconnecting...',
+    );
+    await _closeConnection();
+    _scheduleReconnect();
+  }
+
+  Future<void> testCellular() async {
+    if (!state.isConnected ||
+        state.cellularStatus == 'testing' ||
+        _configuring) {
+      return;
     }
+    final identity = await _readIdentity();
+    if (identity['pv'] == null) {
+      throw StateError('Install updated firmware to run the SIM check.');
+    }
+    await _configCharacteristic!.write(
+      utf8.encode(jsonEncode({'command': 'test_cellular'})),
+      withoutResponse: false,
+    );
+    state = state.copyWith(
+      cellularStatus: 'testing',
+      message: 'Checking the wearable SIM connection. No SOS will be created.',
+    );
+  }
+
+  Future<void> updateCellularSettings() async {
+    if (!state.isConnected || _configuring) return;
+    if (!AppConfig.directCellularReady) {
+      throw StateError(
+        'Set a public HTTPS server address in Settings first. A local Wi-Fi address cannot be reached by the wearable SIM.',
+      );
+    }
+    _configuring = true;
+    try {
+      final identity = await _readIdentity();
+      if (identity['pv'] == null) {
+        throw StateError(
+          'Install the updated firmware before updating cellular settings.',
+        );
+      }
+      if (identity['pairingWindow'] != true) {
+        throw StateError(
+          'Hold the wearable button for 3 seconds, then update settings within 2 minutes.',
+        );
+      }
+      await _configCharacteristic!.write(
+        utf8.encode(
+          jsonEncode({
+            'command': 'configure_cellular',
+            'apiBase': AppConfig.apiBaseUrl,
+            'apn': AppConfig.cellularApn,
+            'cellularEnabled': true,
+            'caFile': AppConfig.modemCaFile,
+          }),
+        ),
+        withoutResponse: false,
+        allowLongWrite: true,
+      );
+      final updated = await _readIdentity();
+      if (updated['pv'] == identity['pv'] ||
+          updated['directCellularEnabled'] != true) {
+        throw StateError(
+          'Settings were not saved. Hold the wearable button for 3 seconds and try again.',
+        );
+      }
+      await refreshStatus();
+      unawaited(_syncDeviceStatus());
+      state = state.copyWith(
+        message:
+            'Cellular settings saved. Run the SIM connection check before using the wearable without your phone.',
+      );
+    } finally {
+      _configuring = false;
+    }
+  }
+
+  Future<void> _syncDeviceStatus() async {
+    if (!state.isConnected || state.serverDeviceId == null) return;
+    try {
+      await _dio.patch(
+        '/user/ble-devices/${state.serverDeviceId}/status',
+        data: {
+          'fingerprintEnrolled': state.fingerprintEnrolled,
+          'fingerprintRequired': state.fingerprintRequired,
+          'directCellularEnabled': state.directCellularEnabled,
+          'firmwareVersion': state.firmwareVersion,
+        },
+      );
+    } catch (_) {
+      /* Retry on the next connection. */
+    }
+  }
+
+  Future<void> disconnect({bool clearState = false}) async {
+    ++_operation;
+    _manualDisconnect = true;
+    _reconnectTimer?.cancel();
+    if (mounted) {
+      state = clearState
+          ? const BleDeviceState()
+          : state.copyWith(connection: BleConnectionState.disconnected);
+    }
+    final closing = _closeConnection();
+    try {
+      await FlutterBluePlus.stopScan();
+    } catch (_) {}
+    await closing;
+  }
+
+  Future<void> _closeConnection() async {
+    final scanSub = _scanSub;
+    final connSub = _connSub;
+    final notifications = List.of(_notifySubscriptions);
+    final device = _device;
+    _scanSub = null;
+    _connSub = null;
     _notifySubscriptions.clear();
     _heartbeatTimer?.cancel();
-    try {
-      await _device?.disconnect();
-    } catch (_) {}
     _device = null;
     _configCharacteristic = null;
-    if (clearState) state = const BleDeviceState();
+    await scanSub?.cancel();
+    await connSub?.cancel();
+    for (final subscription in notifications) {
+      await subscription.cancel();
+    }
+    try {
+      await device?.disconnect();
+    } catch (_) {}
   }
 
   @override
   void dispose() {
+    _reconnectTimer?.cancel();
     unawaited(disconnect());
     super.dispose();
   }
