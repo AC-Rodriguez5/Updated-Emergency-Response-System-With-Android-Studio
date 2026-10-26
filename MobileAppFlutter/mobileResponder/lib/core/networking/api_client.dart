@@ -46,10 +46,13 @@ final dioProvider = Provider<Dio>((ref) {
         }
       }
       if (error.response?.statusCode == 401) {
+        final attempted = await storage.getRefreshToken();
+        if (attempted == null) {
+          await storage.clearTokens();
+          return handler.next(error);
+        }
         try {
-          final refreshToken = await storage.getRefreshToken();
-          if (refreshToken == null) { await storage.clearTokens(); return handler.next(error); }
-          final response = await Dio().post('${AppConfig.apiBaseUrl}/auth/refresh', data: {'refreshToken': refreshToken});
+          final response = await Dio().post('${AppConfig.apiBaseUrl}/auth/refresh', data: {'refreshToken': attempted});
           final data = response.data as Map<String, dynamic>;
           final newAccess = data['data']['accessToken'] as String;
           final newRefresh = data['data']['refreshToken'] as String;
@@ -57,7 +60,34 @@ final dioProvider = Provider<Dio>((ref) {
           error.requestOptions.headers['Authorization'] = 'Bearer $newAccess';
           final retried = await dio.fetch<dynamic>(error.requestOptions);
           return handler.resolve(retried);
-        } catch (_) { await storage.clearTokens(); }
+        } catch (_) {
+          /*
+            A refused refresh is not proof the session is over.
+
+            Refresh tokens rotate and the old one is revoked on use, and while
+            the responder is on duty the foreground service renews the same pair
+            from its own isolate. Whichever side loses that race presents a token
+            that was valid a moment ago, gets a 401, and used to respond by
+            clearing the store — signing a responder out in the middle of a
+            shift over a race nobody lost anything to. If the stored token has
+            moved on since this call read it, the other side succeeded: use what
+            it left behind.
+          */
+          final current = await storage.getRefreshToken();
+          if (current != null && current != attempted) {
+            final access = await storage.getAccessToken();
+            if (access != null) {
+              error.requestOptions.headers['Authorization'] = 'Bearer $access';
+              try {
+                return handler.resolve(await dio.fetch<dynamic>(error.requestOptions));
+              } on DioException catch (e) {
+                return handler.next(e);
+              }
+            }
+          } else {
+            await storage.clearTokens();
+          }
+        }
       }
       handler.next(error);
     },

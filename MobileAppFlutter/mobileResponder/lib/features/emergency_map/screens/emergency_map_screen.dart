@@ -106,6 +106,7 @@ class _EmergencyMapScreenState extends ConsumerState<EmergencyMapScreen> {
           '';
       final status = payload['status'] as String?;
       final type = payload['type'] as String?;
+      final source = payload['source'] as String? ?? 'mobile_app';
       final responder = ref.read(currentResponderProvider);
       final isAssignedToMe =
           payload['assignedResponderId'] != null &&
@@ -125,7 +126,7 @@ class _EmergencyMapScreenState extends ConsumerState<EmergencyMapScreen> {
       if (type != null &&
           responder != null &&
           !isAssignedToMe &&
-          !responder.canHandleEmergencyType(type)) {
+          !responder.canHandleIncident(type: type, source: source)) {
         ref.read(emergencyFeedProvider.notifier).remove(id);
         return;
       }
@@ -165,7 +166,8 @@ class _EmergencyMapScreenState extends ConsumerState<EmergencyMapScreen> {
     final rawFeed = ref.watch(emergencyFeedProvider);
     final feed = rawFeed.where((em) {
       if (em.assignedResponderId == responder?.id) return true;
-      return responder?.canHandleEmergencyType(em.type) ?? true;
+      return responder?.canHandleIncident(type: em.type, source: em.source) ??
+          true;
     }).toList();
     final criticals = feed.where((e) => e.isCritical).length;
 
@@ -807,10 +809,14 @@ class _OnTheWayRowState extends State<_OnTheWayRow> {
     // A dispatcher sent this here and is waiting to hear that a person, not a
     // phone in a pocket, has it.
     final needsAcknowledgement = isMine && widget.emergency.assignmentAckAt == null;
-    final canSelfAccept =
-        isPending && (responder?.canSelfAssign(widget.emergency.type) ?? false);
-    final outOfRole =
-        isPending && !(responder?.canSelfAssign(widget.emergency.type) ?? false);
+    final mayAccept =
+        responder?.canAcceptIncident(
+          type: widget.emergency.type,
+          source: widget.emergency.source,
+        ) ??
+        false;
+    final canSelfAccept = isPending && mayAccept;
+    final outOfRole = isPending && !mayAccept;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -1,5 +1,6 @@
 import type {
   EmergencyType,
+  IEmergency,
   IResponder,
   ResponderRole,
 } from '../../models/index.js';
@@ -55,4 +56,43 @@ export function canResponderHandleEmergency(
   emergencyType: EmergencyType,
 ): boolean {
   return emergencyTypesForResponder(responder).includes(emergencyType);
+}
+
+/**
+ * A press on the panic button is the one alert nobody triaged.
+ *
+ * Every other incident carries a type somebody chose — a resident picked
+ * "medical" in the app, a dispatcher logged a fire. The wearable has one button
+ * and no way to ask what happened, so the backend files it as `general_sos`
+ * because the schema needs a value, not because anyone decided it was a rescue
+ * call.
+ *
+ * Routing that value through the ordinary role filter meant a hardware alert
+ * reached MDRRMO and rescue accounts and *nobody else*: a medic, a fire
+ * responder or a police responder on duty two streets away was never told, on
+ * the strength of a category the press never claimed. Hardware-sourced
+ * incidents therefore skip role filtering entirely — for the feed, for the
+ * socket fan-out, and for self-accept, so whoever is nearest can take it.
+ */
+export const HARDWARE_SOURCES = ['iot_device', 'iot_keychain'] as const;
+
+export function isHardwareSourced(source: IEmergency['source'] | undefined): boolean {
+  return (HARDWARE_SOURCES as readonly string[]).includes(source ?? '');
+}
+
+/** Every responder's socket joins this, so an untriaged press reaches all of them. */
+export const RESPONDER_BROADCAST_ROOM = 'responder-feed:all';
+
+/**
+ * Role check for a whole incident rather than a bare type, which is what every
+ * caller actually has. Use this in preference to
+ * {@link canResponderHandleEmergency}: a type on its own cannot tell you
+ * whether a person chose it.
+ */
+export function canResponderHandleIncident(
+  responder: Pick<IResponder, 'responderRole' | 'department' | 'agencyType'>,
+  incident: Pick<IEmergency, 'type' | 'source'>,
+): boolean {
+  if (isHardwareSourced(incident.source)) return true;
+  return canResponderHandleEmergency(responder, incident.type);
 }

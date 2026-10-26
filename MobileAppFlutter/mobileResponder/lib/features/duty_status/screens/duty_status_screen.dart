@@ -45,10 +45,19 @@ class _DutyStatusScreenState extends ConsumerState<DutyStatusScreen> {
     }
   }
 
-  void _toggleDuty(bool isOnDuty) {
-    ref.read(dutyProvider.notifier).toggle();
-    if (!isOnDuty) {
-      setState(() => _dutyStart = DateTime.now());
+  /// [goOnDuty] is what the responder asked for, not what the switch shows.
+  ///
+  /// Nothing here assumes the request worked. The notifier only reports on duty
+  /// once the backend has said so, and the location broadcast starts off the
+  /// state that comes back rather than off the tap.
+  Future<void> _setDuty(bool goOnDuty) async {
+    await ref.read(dutyProvider.notifier).setOnDuty(goOnDuty);
+    if (!mounted) return;
+    final duty = ref.read(dutyProvider);
+    if (duty.isOnDuty) {
+      setState(() => _dutyStart ??= DateTime.now());
+      // Delegates to the duty foreground service when it is up, so the stream
+      // survives the app being pocketed.
       ref.read(locationServiceProvider).startBroadcast();
     } else {
       setState(() => _dutyStart = null);
@@ -58,7 +67,8 @@ class _DutyStatusScreenState extends ConsumerState<DutyStatusScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isOnDuty = ref.watch(dutyProvider);
+    final duty = ref.watch(dutyProvider);
+    final isOnDuty = duty.isOnDuty;
     final responder = ref.watch(currentResponderProvider);
     final stateColor = isOnDuty ? AppColors.successGreen : AppColors.textMuted;
 
@@ -134,7 +144,11 @@ class _DutyStatusScreenState extends ConsumerState<DutyStatusScreen> {
                   const SizedBox(height: 4),
                   Text(
                     isOnDuty
-                        ? 'Visible to dispatch and sharing live location'
+                        ? duty.listening
+                              ? 'Visible to dispatch · alerts will ring even '
+                                    'with the app closed'
+                              : 'Visible to dispatch, but this phone will not '
+                                    'ring with the app closed'
                         : 'Go on duty when you are ready to respond',
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: Colors.white60, fontSize: 12),
@@ -182,6 +196,23 @@ class _DutyStatusScreenState extends ConsumerState<DutyStatusScreen> {
                         ? AppColors.successGreen
                         : AppColors.warningAmber,
                   ),
+                  const Divider(height: 24),
+                  _StatusRow(
+                    icon: duty.listening
+                        ? Icons.notifications_active_rounded
+                        : Icons.notifications_off_rounded,
+                    label: 'Alerts with the app closed',
+                    value: isOnDuty
+                        ? duty.listening
+                              ? 'Listening'
+                              : 'Not listening — allow notifications'
+                        : 'Starts with your duty session',
+                    valueColor: !isOnDuty
+                        ? AppColors.textMuted
+                        : duty.listening
+                        ? AppColors.successGreen
+                        : AppColors.alertRed,
+                  ),
                   if (responder?.stationName != null) ...[
                     const Divider(height: 24),
                     _StatusRow(
@@ -194,13 +225,39 @@ class _DutyStatusScreenState extends ConsumerState<DutyStatusScreen> {
                 ],
               ),
             ),
+            if (duty.error != null) ...[
+              const SizedBox(height: 18),
+              _DutyProblem(
+                message: duty.error!,
+                onDismiss: ref.read(dutyProvider.notifier).dismissError,
+              ),
+            ],
             const SizedBox(height: 24),
             ElevatedButton.icon(
-              onPressed: () => _toggleDuty(isOnDuty),
-              icon: Icon(
-                isOnDuty ? Icons.pause_circle_outline : Icons.play_circle_fill,
+              onPressed: duty.isChanging ? null : () => _setDuty(!isOnDuty),
+              icon: duty.isChanging
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Icon(
+                      isOnDuty
+                          ? Icons.pause_circle_outline
+                          : Icons.play_circle_fill,
+                    ),
+              label: Text(
+                duty.isChanging
+                    ? isOnDuty
+                          ? 'Ending duty session…'
+                          : 'Starting duty session…'
+                    : isOnDuty
+                    ? 'End duty session'
+                    : 'Start duty session',
               ),
-              label: Text(isOnDuty ? 'End duty session' : 'Start duty session'),
               style: ElevatedButton.styleFrom(
                 minimumSize: const Size.fromHeight(58),
                 backgroundColor: isOnDuty
@@ -281,5 +338,56 @@ class _StatusRow extends StatelessWidget {
         ),
       ),
     ],
+  );
+}
+
+/// A duty change that did not take.
+///
+/// The old toggle discarded its own errors, which is the worst of the available
+/// options: the responder reads "ON DUTY", dispatch reads off duty, and the call
+/// goes to somebody else. Whatever went wrong is said here, in the terms that
+/// matter to the person holding the phone.
+class _DutyProblem extends StatelessWidget {
+  const _DutyProblem({required this.message, required this.onDismiss});
+
+  final String message;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+    decoration: BoxDecoration(
+      color: AppColors.alertRed.withValues(alpha: .08),
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: AppColors.alertRed.withValues(alpha: .35)),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Icon(
+          Icons.warning_amber_rounded,
+          color: AppColors.alertRed,
+          size: 20,
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            message,
+            style: const TextStyle(
+              fontSize: 12.5,
+              height: 1.35,
+              fontWeight: FontWeight.w600,
+              color: AppColors.alertRed,
+            ),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Dismiss',
+          onPressed: onDismiss,
+          icon: const Icon(Icons.close_rounded, size: 18),
+          color: AppColors.alertRed,
+        ),
+      ],
+    ),
   );
 }

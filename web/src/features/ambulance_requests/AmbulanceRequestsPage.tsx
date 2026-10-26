@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
@@ -9,7 +9,6 @@ import { TableSkeleton } from '@/components/ui/Skeleton';
 import { Modal } from '@/components/ui/Modal';
 import { AuthedImage } from '@/components/ui/AuthedImage';
 import { api, getApiError } from '@/services/apiClient';
-import { getSocket } from '@/services/socketClient';
 import { fmt } from '@/lib/utils';
 import type { AmbulanceRequest, AmbulanceUnit, Paginated, ResponderRegistration } from '@/types';
 
@@ -96,7 +95,11 @@ export default function AmbulanceRequestsPage() {
   const [assignmentSuccess, setAssignmentSuccess] = useState<string | null>(null);
   const dialogOpen = rejectModal || assignModal;
 
-  const { data: listData, isLoading, refetch } = useQuery({
+  // Liveness is not arranged here any more. `RealtimeProvider` maps every
+  // backend event onto the query keys it invalidates, so this page is current
+  // because it reads the cache — not because it remembered to subscribe. The
+  // interval below is only a safety net for a socket that is down.
+  const { data: listData, isLoading } = useQuery({
     queryKey: ['ambulance-requests', statusFilter, includeArchived],
     queryFn: async () => {
       const qs = new URLSearchParams();
@@ -149,22 +152,6 @@ export default function AmbulanceRequestsPage() {
   const selectedResponderDetails =
     activeResponders.find(({ responder }) => responder._id === selectedResponder) ?? null;
   const inactiveResponderCount = Math.max((responders?.length ?? 0) - activeResponders.length, 0);
-
-  useEffect(() => {
-    const socket = getSocket();
-    if (!socket) return;
-    const handler = () => void refetch();
-    socket.on('ambulance_request.created', handler);
-    socket.on('ambulance_request.reviewed', handler);
-    socket.on('ambulance_request.assigned', handler);
-    socket.on('ambulance_request.completed', handler);
-    return () => {
-      socket.off('ambulance_request.created', handler);
-      socket.off('ambulance_request.reviewed', handler);
-      socket.off('ambulance_request.assigned', handler);
-      socket.off('ambulance_request.completed', handler);
-    };
-  }, [refetch]);
 
   const approveMutation = useMutation({
     mutationFn: async (id: string) => api.post(`/admin/ambulance-requests/${id}/approve`, { notes: 'Approved by admin' }),

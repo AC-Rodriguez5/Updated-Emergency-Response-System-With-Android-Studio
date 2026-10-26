@@ -65,7 +65,20 @@ class ResponderModel {
   };
 
   bool get isPending => approvalStatus == 'pending';
-  bool get isOnDuty => dutyStatus == 'on_duty' || dutyStatus == 'busy';
+
+  /// The same set the backend treats as live (`LIVE_RESPONDER_STATUSES`).
+  ///
+  /// `available` and `responding` are not states a responder ever picks — the
+  /// backend moves them there when an incident is assigned, started or
+  /// resolved. Reading only `on_duty` and `busy` meant a responder whose last
+  /// call had just been closed came back to an app that said OFF DUTY while
+  /// dispatch still had them on the roster.
+  bool get isOnDuty => const {
+    'on_duty',
+    'available',
+    'busy',
+    'responding',
+  }.contains(dutyStatus);
 
   Set<String> get allowedEmergencyTypes {
     final types = <String>{};
@@ -102,4 +115,22 @@ class ResponderModel {
   // Self-accept: only when the responder's role explicitly covers this type.
   bool canSelfAssign(String type) =>
       allowedEmergencyTypes.isNotEmpty && allowedEmergencyTypes.contains(type);
+
+  /// Role rules for a whole incident, which is what every caller actually has.
+  ///
+  /// A panic-button press is filed as `general_sos` because the schema needs a
+  /// value — the wearable has one button and no way to ask what happened. Run
+  /// through the ordinary role filter, that placeholder category hid every
+  /// hardware alert from medics, fire and police: the app dropped the socket
+  /// event and the backend left it out of the feed. Hardware alerts belong to
+  /// whoever is nearest, so they skip the filter on both sides
+  /// (`responderRoleAccess.ts`, `isHardwareSourced`).
+  bool canHandleIncident({required String type, required String source}) =>
+      isHardwareIncident(source) || canHandleEmergencyType(type);
+
+  bool canAcceptIncident({required String type, required String source}) =>
+      isHardwareIncident(source) || canSelfAssign(type);
+
+  static bool isHardwareIncident(String source) =>
+      source == 'iot_device' || source == 'iot_keychain';
 }

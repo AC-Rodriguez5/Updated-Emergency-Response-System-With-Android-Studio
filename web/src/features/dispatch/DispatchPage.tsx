@@ -23,6 +23,13 @@ function needsDispatcher(em: Emergency): boolean {
 
 export default function DispatchPage() {
   const qc = useQueryClient();
+  /*
+    This page had no realtime subscription of any kind. An emergency reached the
+    one screen whose whole purpose is sending somebody to it on the next
+    fifteen-second poll — and a hardware panic button reached it no faster.
+    `RealtimeProvider` now invalidates both queries below the moment the event
+    lands, and the intervals are left as a backstop for a socket that is down.
+  */
   const [selectedEmergency, setSelectedEmergency] = useState<Emergency | null>(null);
   const [selectedResponder, setSelectedResponder] = useState<string>('');
   const [dispatchError, setDispatchError] = useState<string | null>(null);
@@ -37,7 +44,7 @@ export default function DispatchPage() {
         .filter(needsDispatcher)
         .sort((a, b) => Number(b.dispatchOverdue ?? false) - Number(a.dispatchOverdue ?? false));
     },
-    refetchInterval: 15_000,
+    refetchInterval: 60_000,
   });
 
   const { data: responders, isLoading: rLoading } = useQuery({
@@ -46,7 +53,7 @@ export default function DispatchPage() {
       const { data } = await api.get<{ data: ResponderLiveLocation[] }>('/responders/locations/live');
       return data.data;
     },
-    refetchInterval: 15_000,
+    refetchInterval: 60_000,
   });
 
   const releaseMutation = useMutation({

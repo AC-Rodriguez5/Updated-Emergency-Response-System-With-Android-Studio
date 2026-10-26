@@ -2,6 +2,10 @@ import type { Server as SocketServer } from 'socket.io';
 import type { Types } from 'mongoose';
 import type { IEmergency } from '../../models/index.js';
 import { recordEmergencyNotification } from '../notifications/notifications.service.js';
+import {
+  RESPONDER_BROADCAST_ROOM,
+  isHardwareSourced,
+} from './responderRoleAccess.js';
 
 export type EmergencyEventName =
   | 'emergency.created'
@@ -100,6 +104,13 @@ export function emitEmergencyEvent(
     io.to(userRoom).emit(event, payload);
     io.to(emergencyRoom).emit(event, payload);
     io.to(responderFeedRoom).emit(event, payload);
+    // A panic-button press claimed no category, so it is not the type feed's to
+    // keep: it goes to every responder on the namespace. See
+    // `isHardwareSourced`. Socket.IO de-duplicates across rooms, so a responder
+    // in both rooms still receives one copy.
+    if (isHardwareSourced(emergency.source)) {
+      io.to(RESPONDER_BROADCAST_ROOM).emit(event, payload);
+    }
     if (emergency.assignedResponderId) {
       io.to(`responder:${emergency.assignedResponderId.toString()}`).emit(event, payload);
     }

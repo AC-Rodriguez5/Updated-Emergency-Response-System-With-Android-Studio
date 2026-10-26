@@ -1,5 +1,4 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -17,7 +16,6 @@ import { StatCard } from '@/components/ui/StatCard';
 import { StatusBadge, TypeBadge, PriorityBadge } from '@/components/ui/Badge';
 import { TableSkeleton } from '@/components/ui/Skeleton';
 import { api } from '@/services/apiClient';
-import { getSocket } from '@/services/socketClient';
 import { fmt } from '@/lib/utils';
 import type { DeviceFleet, Emergency, Paginated } from '@/types';
 import { motion } from 'motion/react';
@@ -40,13 +38,17 @@ interface OverviewSnapshot {
 }
 
 export default function DashboardPage() {
-  const { data: overview, refetch: refetchOverview } = useQuery({
+  // Liveness is not arranged here any more. `RealtimeProvider` maps every
+  // backend event onto the query keys it invalidates, so this page is current
+  // because it reads the cache — not because it remembered to subscribe. The
+  // interval below is only a safety net for a socket that is down.
+  const { data: overview } = useQuery({
     queryKey: ['admin-overview'],
     queryFn: async () => {
       const { data } = await api.get<{ data: OverviewSnapshot }>('/admin/overview');
       return data.data;
     },
-    refetchInterval: 30_000,
+    refetchInterval: 60_000,
   });
 
   // Fleet readiness belongs on the landing page: a paired wearable with no
@@ -58,48 +60,17 @@ export default function DashboardPage() {
       const { data } = await api.get<{ data: DeviceFleet }>('/admin/devices?limit=1');
       return data.data.summary;
     },
-    refetchInterval: 60_000,
+    refetchInterval: 120_000,
   });
 
-  const {
-    data: activeData,
-    isLoading,
-    refetch: refetchActive,
-  } = useQuery({
+  const { data: activeData, isLoading } = useQuery({
     queryKey: ['active-emergencies'],
     queryFn: async () => {
       const { data } = await api.get<{ data: Paginated<Emergency> }>('/emergencies/active');
       return data.data;
     },
-    refetchInterval: 30_000,
+    refetchInterval: 60_000,
   });
-
-  useEffect(() => {
-    const socket = getSocket();
-    if (!socket) return;
-    const handler = () => {
-      void refetchActive();
-      void refetchOverview();
-    };
-    socket.on('emergency.created', handler);
-    socket.on('emergency.iot_keychain_created', handler);
-    socket.on('emergency.iot_device_created', handler);
-    socket.on('emergency.updated', handler);
-    socket.on('emergency.resolved', handler);
-    socket.on('emergency.assigned', handler);
-    socket.on('ambulance_request.created', handler);
-    socket.on('ambulance_request.completed', handler);
-    return () => {
-      socket.off('emergency.created', handler);
-      socket.off('emergency.iot_keychain_created', handler);
-      socket.off('emergency.iot_device_created', handler);
-      socket.off('emergency.updated', handler);
-      socket.off('emergency.resolved', handler);
-      socket.off('emergency.assigned', handler);
-      socket.off('ambulance_request.created', handler);
-      socket.off('ambulance_request.completed', handler);
-    };
-  }, [refetchActive, refetchOverview]);
 
   const emergencies = activeData?.items ?? [];
 

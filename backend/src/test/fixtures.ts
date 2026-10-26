@@ -7,6 +7,7 @@ import {
   Responder,
   User,
   type AgencyType,
+  type EmergencySource,
   type IEmergency,
   type EmergencyType,
 } from '../models/index.js';
@@ -120,6 +121,8 @@ export async function makeResponder({
 interface EmergencyOptions {
   userId: string;
   type?: EmergencyType;
+  /** `iot_device` for a panic-button press, which is nobody's speciality. */
+  source?: EmergencySource;
   status?: IEmergency['status'];
   assignedResponderId?: string;
   createdAt?: Date;
@@ -129,6 +132,7 @@ interface EmergencyOptions {
 export async function makeEmergency({
   userId,
   type = 'medical',
+  source = 'mobile_app',
   status = 'pending',
   assignedResponderId,
   createdAt,
@@ -136,7 +140,7 @@ export async function makeEmergency({
 }: EmergencyOptions): Promise<IEmergency> {
   const doc = await Emergency.create({
     type,
-    source: 'mobile_app',
+    source,
     priority: 'high',
     status,
     userId: new mongoose.Types.ObjectId(userId),
