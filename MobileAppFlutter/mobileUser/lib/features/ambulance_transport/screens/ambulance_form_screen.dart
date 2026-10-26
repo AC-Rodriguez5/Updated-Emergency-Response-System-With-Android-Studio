@@ -8,6 +8,7 @@ import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/app_input.dart';
 import '../../auth/providers/auth_provider.dart';
 import 'map_picker_screen.dart';
+import '../widgets/ambulance_consent_sheet.dart';
 
 class AmbulanceFormScreen extends ConsumerStatefulWidget {
   final String requestType;
@@ -112,6 +113,18 @@ class _AmbulanceFormScreenState extends ConsumerState<AmbulanceFormScreen> {
     }
   }
 
+  /// Whether the patient being booked for is somebody other than the account
+  /// holder, which is when the patient has to have been told.
+  ///
+  /// Compared by name, because the form has no "booking for myself" switch. A
+  /// near miss errs towards asking, which is the right way round to be wrong.
+  bool _patientIsSomeoneElse(String? accountName) {
+    final patient = _patientNameCtrl.text.trim().toLowerCase();
+    final holder = (accountName ?? '').trim().toLowerCase();
+    if (patient.isEmpty || holder.isEmpty) return true;
+    return patient != holder;
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     if (_pickupLocation == null) {
@@ -128,9 +141,34 @@ class _AmbulanceFormScreenState extends ConsumerState<AmbulanceFormScreen> {
         return;
       }
     }
+
+    final user = ref.read(currentUserProvider);
+    /*
+      An emergency is never gated on a dialog. For a scheduled or transfer
+      booking the resident is told, before it is sent, what the request shares
+      and with whom; for an emergency the backend records that it was processed
+      to protect life, which is what RA 10173 provides for and what standing
+      between somebody and an ambulance would not be.
+    */
+    AmbulanceConsentDecision? consent;
+    if (widget.requestType != 'emergency') {
+      consent = await showAmbulanceConsentSheet(
+        context,
+        patientIsSomeoneElse: _patientIsSomeoneElse(user?.name),
+      );
+      if (consent == null) {
+        if (mounted) {
+          setState(
+            () => _error = 'The request was not sent. Agree to continue.',
+          );
+        }
+        return;
+      }
+    }
+
+    if (!mounted) return;
     setState(() { _loading = true; _error = null; });
     try {
-      final user = ref.read(currentUserProvider);
       final dio = ref.read(dioProvider);
       final body = <String, dynamic>{
         'requestType': widget.requestType,
@@ -165,6 +203,7 @@ class _AmbulanceFormScreenState extends ConsumerState<AmbulanceFormScreen> {
           'requestedTime':
               '${_requestedTime!.hour.toString().padLeft(2, '0')}:${_requestedTime!.minute.toString().padLeft(2, '0')}',
         if (_notesCtrl.text.trim().isNotEmpty) 'notes': _notesCtrl.text.trim(),
+        if (consent != null) 'consent': consent.toJson(),
       };
       final res = await dio.post('/ambulance-requests', data: body);
       final data = (res.data as Map<String, dynamic>)['data'] as Map<String, dynamic>;

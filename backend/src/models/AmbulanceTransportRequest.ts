@@ -1,5 +1,12 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+import {
+  CONSENT_BASES,
+  CONSENT_SCOPES,
+  type ConsentBasis,
+  type ConsentScope,
+} from '../shared/consent.js';
+
 export type AmbulanceRequestType = 'emergency' | 'schedule' | 'transfer';
 export type AmbulanceRequestStatus =
   | 'pending_review'
@@ -51,6 +58,22 @@ export interface ISenderSnapshot {
   barangay?: string;
 }
 
+/**
+ * Why TanzAlert may hold this booking's contents, recorded with the booking.
+ *
+ * A transport request carries a named patient, their contact and their medical
+ * condition — sensitive personal information, and often about somebody who
+ * is not the account holder. The evidence that it was lawfully collected
+ * belongs on the record it was collected for, not only on the account.
+ */
+export interface IRequestConsent {
+  basis: ConsentBasis;
+  /** The wording agreed to. Absent when the basis is not consent. */
+  version?: string;
+  scopes: ConsentScope[];
+  recordedAt: Date;
+}
+
 export interface IAmbulanceTimelineEvent {
   event: string;
   at: Date;
@@ -64,16 +87,30 @@ export interface IAmbulanceTransportRequest extends Document {
   status: AmbulanceRequestStatus;
   senderUserId: mongoose.Types.ObjectId;
   senderSnapshot: ISenderSnapshot;
-  patient: IPatientInfo;
+  /*
+    Optional because the retention sweep erases them from a long-finished
+    booking. Everything that reads one has to cope with a record whose personal
+    contents are gone and whose skeleton — type, status, dates, unit, barangay,
+    timeline — remains. See `personalDataRedactedAt`.
+  */
+  patient?: IPatientInfo;
   accompanyingPerson?: IAccompanyingPerson;
-  pickupLocation: IGeoLocationLabeled;
-  dropOffLocation: IGeoLocationLabeled;
+  pickupLocation?: IGeoLocationLabeled;
+  dropOffLocation?: IGeoLocationLabeled;
   requestedDate?: Date;
   requestedTime?: string;
   estimatedPickupDurationMin?: number;
   estimatedTransportDurationMin?: number;
   transferDetails?: ITransferDetails;
   notes?: string;
+  consent?: IRequestConsent;
+  /**
+   * When the retention sweep erased this booking's personal contents.
+   *
+   * Set so a bare old record reads as erased on schedule rather than as one
+   * that was never filled in, and so the sweep never touches it twice.
+   */
+  personalDataRedactedAt?: Date;
 
   isEmergencyPriority: boolean;
   isTanzaCitizenPriority: boolean;
@@ -105,6 +142,16 @@ const geoLocationLabeledSchema = new Schema<IGeoLocationLabeled>(
     coordinates: { type: [Number], required: true },
     addressLabel: { type: String, required: true, trim: true, minlength: 3, maxlength: 250 },
     accuracyMeters: { type: Number, min: 0, max: 5000 },
+  },
+  { _id: false },
+);
+
+const requestConsentSchema = new Schema<IRequestConsent>(
+  {
+    basis: { type: String, enum: CONSENT_BASES, required: true },
+    version: { type: String, trim: true, maxlength: 20 },
+    scopes: { type: [String], enum: CONSENT_SCOPES, required: true, default: [] },
+    recordedAt: { type: Date, required: true, default: Date.now },
   },
   { _id: false },
 );
@@ -185,10 +232,10 @@ const ambulanceTransportRequestSchema = new Schema<IAmbulanceTransportRequest>(
     },
     senderUserId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     senderSnapshot: { type: senderSnapshotSchema, default: {} },
-    patient: { type: patientSchema, required: true },
+    patient: { type: patientSchema, required: false },
     accompanyingPerson: { type: accompanyingPersonSchema },
-    pickupLocation: { type: geoLocationLabeledSchema, required: true },
-    dropOffLocation: { type: geoLocationLabeledSchema, required: true },
+    pickupLocation: { type: geoLocationLabeledSchema, required: false },
+    dropOffLocation: { type: geoLocationLabeledSchema, required: false },
 
     requestedDate: { type: Date },
     requestedTime: { type: String, trim: true, maxlength: 5 },
@@ -196,6 +243,8 @@ const ambulanceTransportRequestSchema = new Schema<IAmbulanceTransportRequest>(
     estimatedTransportDurationMin: { type: Number, min: 0, max: 1440 },
     transferDetails: { type: transferDetailsSchema },
     notes: { type: String, trim: true, maxlength: 500 },
+    consent: { type: requestConsentSchema, required: false },
+    personalDataRedactedAt: { type: Date },
 
     isEmergencyPriority: { type: Boolean, default: false, required: true },
     isTanzaCitizenPriority: { type: Boolean, default: false, required: true },

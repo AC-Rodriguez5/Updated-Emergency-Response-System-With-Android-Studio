@@ -19,6 +19,14 @@ class ApiException implements Exception {
   bool get isNotApproved => code == 'ACCOUNT_NOT_APPROVED';
   bool get isRateLimited => statusCode == 429;
 
+  /// The security check, in any of the ways it can go wrong. A challenge is
+  /// spent as soon as it is submitted, so all of these mean the same thing to a
+  /// screen: draw a new one.
+  bool get isCaptchaFailure =>
+      code == 'CAPTCHA_REQUIRED' ||
+      code == 'CAPTCHA_INVALID' ||
+      code == 'CAPTCHA_UNAVAILABLE';
+
   @override
   String toString() => 'ApiException($statusCode, $code): $message';
 }

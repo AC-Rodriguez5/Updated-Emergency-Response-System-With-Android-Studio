@@ -36,6 +36,16 @@ export const registrationLimiter = rateLimit({
   keyGenerator: (req) => `register:${clientIp(req)}`,
 });
 
+// Drawing a challenge is cheap, and somebody squinting at a phone may well ask
+// for three or four fresh ones before they get a clean read. Generous enough to
+// never catch that person, tight enough that the endpoint is not free CPU.
+export const captchaChallengeLimiter = rateLimit({
+  ...baseOptions,
+  windowMs: 60 * 1000,
+  limit: 30,
+  keyGenerator: (req) => `captcha:${clientIp(req)}`,
+});
+
 export const emergencyCreateLimiter = rateLimit({
   ...baseOptions,
   windowMs: 60 * 1000,

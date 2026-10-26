@@ -1,11 +1,33 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+import {
+  CONSENT_ACTIONS,
+  CONSENT_SCOPES,
+  type ConsentAction,
+  type ConsentScope,
+} from '../shared/consent.js';
+
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 
 export interface IEmbeddedContact {
   name: string;
   phone: string;
   isPrimary: boolean;
+}
+
+/**
+ * One thing a resident agreed to, or took back, at one moment.
+ *
+ * Append-only: a withdrawal is a new row, never an edit to the row that granted
+ * it. Under RA 10173 the question is not only what someone allows now but what
+ * they were told and allowed at the time, and an overwritten field cannot
+ * answer that.
+ */
+export interface IConsentRecord {
+  version: string;
+  scopes: ConsentScope[];
+  action: ConsentAction;
+  recordedAt: Date;
 }
 
 export interface ILocationHistoryPoint {
@@ -46,6 +68,8 @@ export interface IUser extends Document {
 
   locationHistory: ILocationHistoryPoint[];
 
+  consentLog: IConsentRecord[];
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -55,6 +79,16 @@ const embeddedContactSchema = new Schema<IEmbeddedContact>(
     name: { type: String, required: true, trim: true },
     phone: { type: String, required: true, trim: true },
     isPrimary: { type: Boolean, default: false },
+  },
+  { _id: true },
+);
+
+const consentRecordSchema = new Schema<IConsentRecord>(
+  {
+    version: { type: String, required: true, trim: true, maxlength: 20 },
+    scopes: { type: [String], enum: CONSENT_SCOPES, required: true, default: [] },
+    action: { type: String, enum: CONSENT_ACTIONS, required: true },
+    recordedAt: { type: Date, required: true, default: Date.now },
   },
   { _id: true },
 );
@@ -109,6 +143,8 @@ const userSchema = new Schema<IUser>(
     emergencyContactNumber: { type: String, trim: true, maxlength: 20 },
 
     locationHistory: { type: [locationHistoryPointSchema], default: [] },
+
+    consentLog: { type: [consentRecordSchema], default: [] },
   },
   { timestamps: true },
 );

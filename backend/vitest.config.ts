@@ -19,6 +19,18 @@ export default defineConfig({
       ADMIN_PASSWORD: 'test-only-admin-password',
       DISPATCH_ACK_SECONDS: '90',
       DISPATCH_OVERDUE_SECONDS: '120',
+      // Pinned so the gating tests do not depend on whichever provider the
+      // developer's own .env happens to name.
+      CAPTCHA_PROVIDER: 'builtin',
+      /*
+        Likewise pinned. A developer whose .env arms the dry run — which is the
+        right thing to do on a deployment with a backlog — would otherwise turn
+        every retention test into a no-op that still passes its own assertions
+        about counts while deleting nothing.
+      */
+      RETENTION_DRY_RUN: 'false',
+      LOCATION_RETENTION_DAYS: '365',
+      TRANSPORT_RETENTION_DAYS: '365',
     },
     testTimeout: 30_000,
     // The first run downloads a mongod binary.

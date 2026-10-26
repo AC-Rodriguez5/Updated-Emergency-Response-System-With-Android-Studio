@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CONSENT_SCOPES } from '../../shared/consent.js';
 
 const geoPointSchema = z
   .object({
@@ -44,6 +45,33 @@ export const createAmbulanceRequestSchema = z
       .strict()
       .optional(),
     notes: z.string().trim().max(500).optional(),
+    /*
+      What the resident agreed to on the booking consent sheet.
+
+      Optional so a client one version behind can still book — being turned
+      away mid-booking over an app update is the worse outcome. The app is the
+      gate; this is the record. `basis` is not accepted from the client: an
+      emergency is decided here, from the request type.
+    */
+    consent: z
+      .object({
+        version: z.string().trim().min(1).max(20),
+        /*
+          Unknown scope names are dropped, not rejected: refusing a transport
+          booking because a newer app named a permission this server has not
+          heard of would turn a consent detail into a refused ambulance.
+        */
+        scopes: z
+          .array(z.string().trim().max(60))
+          .max(12)
+          .transform((scopes) =>
+            scopes.filter((scope): scope is (typeof CONSENT_SCOPES)[number] =>
+              (CONSENT_SCOPES as readonly string[]).includes(scope),
+            ),
+          ),
+      })
+      .strict()
+      .optional(),
     isTanzaCitizen: z.boolean().default(false),
     barangay: z.string().trim().max(120).optional(),
   })

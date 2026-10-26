@@ -130,6 +130,23 @@ export async function registerUser(
       faceCaptureFileId: faceFileId,
       proofOfResidencyFileId: proofFileId,
       contacts: [],
+      /*
+        The consent form tells the resident, in writing, that their grant is
+        saved to their account with a timestamp. This is that record. An older
+        app that sends nothing leaves the log empty rather than inventing a
+        grant nobody gave.
+      */
+      consentLog:
+        input.consentVersion && input.consentScopes?.length
+          ? [
+              {
+                version: input.consentVersion,
+                scopes: input.consentScopes,
+                action: 'granted' as const,
+                recordedAt: new Date(),
+              },
+            ]
+          : [],
     });
   } catch (err) {
     await filesService.deleteFile(faceFileId);

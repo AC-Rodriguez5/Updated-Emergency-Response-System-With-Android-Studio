@@ -52,28 +52,33 @@ class TanzAlertAuthHero extends StatelessWidget {
                 child: Icon(icon, color: accent, size: 23),
               ),
               const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'TanzAlert',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -.4,
+              // Expanded: the eyebrow is caller-supplied and set in spaced
+              // capitals, so a longer one than 'Resident access' runs past the
+              // edge of a small phone rather than wrapping.
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'TanzAlert',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -.4,
+                      ),
                     ),
-                  ),
-                  Text(
-                    eyebrow.toUpperCase(),
-                    style: TextStyle(
-                      color: accent,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.5,
+                    Text(
+                      eyebrow.toUpperCase(),
+                      style: TextStyle(
+                        color: accent,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.5,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),
